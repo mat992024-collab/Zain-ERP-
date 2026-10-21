@@ -130,8 +130,9 @@ async function main() {
   await evalJs(`localStorage.setItem('zain_token', ${JSON.stringify(token)})`);
 
   phase = 'seed';
-  const seeded = await evalJs(`fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({name:'صنف اختبار المتصفح',category:'اختبار',barcode:'UITEST1',sale_price:1500,cost_price:900,quantity:50})}).then(r=>r.status)`, true);
-  check('seed product created', seeded === 201, String(seeded));
+  const seeded = await evalJs(`fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({name:'صنف اختبار المتصفح',category:'اختبار',barcode:'UITEST1',sale_price:1500,cost_price:900,quantity:50})}).then(r=>r.json()).then(d=>d.product.id)`, true);
+  check('seed product created', typeof seeded === 'number' && seeded > 0, String(seeded));
+  const productId = seeded;
 
   phase = 'shell';
   await nav(BASE);
@@ -202,6 +203,27 @@ async function main() {
   const settingsField = await evalJs(`!!document.querySelector('#set_company_name')`);
   check('settings modal opens', settingsField === true);
   await evalJs(`document.querySelector('.modal-backdrop [data-close], .modal-backdrop [data-cancel]') && document.querySelector('.modal-backdrop [data-close], .modal-backdrop [data-cancel]').click()`);
+
+  phase = 'print';
+  const saleId = await evalJs(`fetch('/api/sales?type=sale',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows[0].id)`, true);
+  await nav(`${BASE}/api/print/thermal/${saleId}?width=80&token=${token}`);
+  const thermal = await evalJs(`document.body.innerText`);
+  check('thermal receipt renders', thermal.length > 40, 'chars=' + thermal.length);
+  const pdf = await send('Page.printToPDF', { printBackground: true, preferCSSPageSize: true }).catch(() => null);
+  check('print pipeline outputs PDF', !!pdf && !!pdf.data && pdf.data.length > 800, 'bytes=' + (pdf && pdf.data ? pdf.data.length : 0));
+
+  await nav(`${BASE}/api/print/a4/${saleId}?token=${token}`);
+  const a4 = await evalJs(`document.body.innerText`);
+  check('A4 invoice renders', a4.length > 40 && /فاتورة/.test(a4), 'chars=' + a4.length);
+
+  const labelsHtml = await evalJs(`fetch('/api/print/labels',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({items:[{product_id:${productId},qty:1}],repeats:2})}).then(r=>r.text())`, true);
+  const tree = await send('Page.getFrameTree');
+  await send('Page.setDocumentContent', { frameId: tree.frameTree.frame.id, html: labelsHtml });
+  await sleep(400);
+  const svgCount = await evalJs(`document.querySelectorAll('svg').length`);
+  const labelText = await evalJs(`document.body.innerText`);
+  check('barcode labels render as SVG', svgCount > 0, 'svg=' + svgCount);
+  check('label shows product name', /صنف اختبار المتصفح/.test(labelText), labelText.slice(0, 40).replace(/\n/g, ' '));
 
   phase = 'offline';
   const external = [...new Set(requests)].filter((u) => !u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:') && !u.startsWith('about:'));

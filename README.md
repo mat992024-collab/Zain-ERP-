@@ -29,11 +29,12 @@
 npm test              # يشغّل الثلاث مجموعات بالترتيب
 npm run test:api      # اختبارات الـ API (41 فحصاً)
 npm run test:render   # رسم كل الشاشات في بيئة DOM وهمية (12 فحصاً)
-npm run test:ui       # متصفح Chrome/Edge حقيقي عبر CDP (27 فحصاً)
+npm run test:ui       # متصفح Chrome/Edge حقيقي عبر CDP (32 فحصاً)
 ```
 - `test:api` يستخدم قاعدة بيانات منفصلة `data/e2e.db`
 - `test:render` و `test:ui` يستخدمان `data/render-test.db` و `data/ui-test.db`
 - `test:ui` يتحقق أيضاً من عدم وجود أي طلب شبكة خارجي (عمل كامل بدون إنترنت)
+- `test:ui` يغطي تدفق بيع كامل في المتصفح + طباعة الإيصال الحراري والفاتورة A4 وملصقات الباركود (مع توليد PDF فعلي)
 
 ## المجلدات
 - `src/server/` الخادم + قاعدة البيانات + API

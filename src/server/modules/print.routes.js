@@ -17,6 +17,8 @@ function htmlDoc(title, bodyCss, body, extraHead = '') {
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="data:,"/>
 <title>${esc(title)}</title>
 ${extraHead}
 <style>
