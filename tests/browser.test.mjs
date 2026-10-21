@@ -138,6 +138,8 @@ async function main() {
   const seedCustomer = await evalJs(`fetch('/api/customers',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({name:'عميل حد الائتمان',type:'retail',credit_limit:1000})}).then(r=>r.json()).then(d=>d.customer.id)`, true);
   check('seed customer created', typeof seedCustomer === 'number' && seedCustomer > 0, String(seedCustomer));
   const customerId = seedCustomer;
+  const lowStockId = await evalJs(`fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({name:'صنف ناقص المخزون',category:'اختبار',barcode:'UILOW1',sale_price:900,cost_price:500,quantity:2,reorder_level:5})}).then(r=>r.json()).then(d=>d.product.id)`, true);
+  check('seed low stock product created', typeof lowStockId === 'number' && lowStockId > 0, String(lowStockId));
 
   phase = 'shell';
   await nav(BASE);
@@ -201,6 +203,43 @@ async function main() {
   check('sale completes and cart clears', cartAfter === 0, 'rows=' + cartAfter);
   const saleCount = await evalJs(`fetch('/api/sales?type=sale',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows.length)`, true);
   check('sale persisted in database', saleCount > 0, 'sales=' + saleCount);
+
+  phase = 'pos-speed';
+  await evalJs(`location.hash = '#/pos'`);
+  await sleep(1500);
+  const quickCount = await evalJs(`document.querySelectorAll('#quickItems [data-qid]').length`);
+  check('quick items strip populated', quickCount > 0, 'items=' + quickCount);
+  const lowBar = await evalJs(`document.getElementById('lowStockBar').innerText`);
+  check('low stock banner visible', /صنف ناقص المخزون/.test(lowBar), lowBar.replace(/\n/g, ' ').slice(0, 60));
+  await evalJs(`document.querySelector('#quickItems [data-qid]').click()`);
+  await sleep(400);
+  const quickCart = await evalJs(`document.querySelectorAll('#cartItems [data-qty]').length`);
+  check('quick item adds to cart', quickCart === 1, 'rows=' + quickCart);
+
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F3',bubbles:true}))`);
+  await sleep(600);
+  const afterSuspend = await evalJs(`document.querySelectorAll('#cartItems [data-qty]').length`);
+  const suspendBadge = await evalJs(`document.getElementById('suspendCount').textContent`);
+  check('F3 suspends the cart', afterSuspend === 0, 'rows=' + afterSuspend);
+  check('suspended counter updated', suspendBadge === '1', 'badge=' + suspendBadge);
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F4',bubbles:true}))`);
+  await sleep(700);
+  const resumeBtn = await evalJs(`!!document.querySelector('[data-resume]')`);
+  check('F4 opens suspended carts', resumeBtn === true);
+  await evalJs(`document.querySelector('[data-resume]').click()`);
+  await sleep(1200);
+  const resumed = await evalJs(`document.querySelectorAll('#cartItems [data-qty]').length`);
+  check('suspended cart resumed', resumed === 1, 'rows=' + resumed);
+
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F5',bubbles:true}))`);
+  await sleep(1500);
+  const repeatRows = await evalJs(`document.querySelectorAll('#cartItems [data-qty]').length`);
+  const repeatQty = await evalJs(`(function(){const el=document.querySelector('#cartItems [data-qty]');return el?Number(el.value):0;})()`);
+  check('F5 repeats last invoice', repeatRows > 0 && repeatQty >= 1, 'rows=' + repeatRows + ' qty=' + repeatQty);
+  await evalJs(`document.getElementById('clearCart').click()`);
+  await sleep(500);
+  await evalJs(`document.querySelector('.modal-backdrop [data-yes]').click()`);
+  await sleep(400);
 
   phase = 'credit-limit';
   await evalJs(`location.hash = '#/pos'`);

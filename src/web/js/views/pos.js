@@ -1,18 +1,28 @@
-import { api, state, money, esc, toast, modal, field, openPrint, debounce, formToObject } from '../core.js';
+import { api, state, money, esc, toast, modal, field, openPrint, debounce, confirmBox } from '../core.js';
+
+const SUSPEND_KEY = 'zain_suspended_carts';
 
 let products = [];
 let customers = [];
+let quick = [];
+let lowStock = [];
 let scanBuffer = '';
 let scanTimer = null;
 let lastKeyTime = 0;
 
 export async function render(c) {
   state.cart = [];
-  state.cartMeta = { customer_id: '', pos_mode: state.settings.default_pos_mode || 'fast', payment_method: 'cash', discount: 0, paid: '' };
+  state.cartMeta = { customer_id: '', pos_mode: state.settings.default_pos_mode || 'fast', payment_method: 'cash', discount: 0, tax: 0, paid: '' };
   [products, customers] = await Promise.all([
     api('GET', '/api/products?page_size=300').then((r) => r.rows).catch(() => []),
     api('GET', '/api/customers?page_size=300').then((r) => r.rows).catch(() => []),
   ]);
+  const [q, l] = await Promise.all([
+    api('GET', '/api/products/quick?limit=12').then((r) => r.rows).catch(() => []),
+    api('GET', '/api/products/low-stock?limit=12').then((r) => r.rows).catch(() => []),
+  ]);
+  quick = q;
+  lowStock = l;
 
   c.innerHTML = `
     <div class="grid grid-cols-12 gap-4 h-[calc(100vh-112px)]">
@@ -21,7 +31,7 @@ export async function render(c) {
           <div class="flex gap-2">
             <div class="relative flex-1">
               <i class="bi bi-upc-scan absolute top-1/2 -translate-y-1/2 right-3.5 text-zain-500 text-lg"></i>
-              <input id="posSearch" class="field !pr-11 !py-3 text-base" placeholder="امسح الباركود أو ابحث عن صنف (F2)..." autocomplete="off" />
+              <input id="posSearch" class="field !pr-11 !py-3 text-base" placeholder="امسح الباركود أو ابحث عن صنف (F1)..." autocomplete="off" />
             </div>
             <select id="posMode" class="field !w-36">
               <option value="fast" ${state.cartMeta.pos_mode === 'fast' ? 'selected' : ''}>بيع سريع</option>
@@ -31,15 +41,34 @@ export async function render(c) {
           </div>
           <div id="searchHint" class="text-[11px] text-slate-400 mt-2">قارئ الباركود جاهز — يمكنك المسح مباشرة في أي وقت</div>
         </div>
+
+        <div class="card p-3">
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs font-black text-slate-700"><i class="bi bi-lightning-charge-fill text-amber-500"></i> أصناف سريعة</div>
+            <div class="hidden xl:flex items-center gap-2 text-[10px] text-slate-400">
+              <kbd class="kbd">F1</kbd> بحث <kbd class="kbd">F3</kbd> تعليق <kbd class="kbd">F4</kbd> معلّقة
+              <kbd class="kbd">F5</kbd> تكرار <kbd class="kbd">F9</kbd> دفع
+            </div>
+          </div>
+          <div id="quickItems" class="flex gap-2 mt-2 overflow-x-auto pb-1"></div>
+        </div>
+
+        <div id="lowStockBar"></div>
+
         <div class="card flex-1 overflow-auto p-4">
           <div id="productGrid" class="grid grid-cols-3 gap-3"></div>
         </div>
       </div>
 
       <div class="col-span-5 card flex flex-col">
-        <div class="p-4 border-b border-slate-100 flex items-center justify-between">
+        <div class="p-4 border-b border-slate-100 flex items-center justify-between gap-2">
           <div class="font-black text-slate-800"><i class="bi bi-cart3 text-zain-500"></i> سلة البيع</div>
-          <button id="clearCart" class="btn btn-ghost btn-sm text-rose-500"><i class="bi bi-trash3"></i> تفريغ</button>
+          <div class="flex items-center gap-1">
+            <button id="repeatSale" class="btn btn-ghost btn-sm" title="تكرار آخر فاتورة (F5)"><i class="bi bi-arrow-repeat"></i> تكرار</button>
+            <button id="suspendCart" class="btn btn-ghost btn-sm" title="تعليق السلة (F3)"><i class="bi bi-pause-circle"></i> تعليق</button>
+            <button id="openSuspended" class="btn btn-ghost btn-sm" title="السلال المعلّقة (F4)"><i class="bi bi-collection"></i> معلّقة <span id="suspendCount" class="badge badge-info">0</span></button>
+            <button id="clearCart" class="btn btn-ghost btn-sm text-rose-500"><i class="bi bi-trash3"></i> تفريغ</button>
+          </div>
         </div>
         <div id="cartItems" class="flex-1 overflow-auto p-3 space-y-2"></div>
         <div class="p-4 border-t border-slate-100 space-y-3 bg-slate-50">
@@ -72,6 +101,10 @@ export async function render(c) {
       e.target.value = '';
       renderGrid('');
     }
+    if (e.key === 'Escape') {
+      e.target.value = '';
+      renderGrid('');
+    }
   });
   c.querySelector('#posMode').addEventListener('change', (e) => {
     state.cartMeta.pos_mode = e.target.value;
@@ -80,40 +113,111 @@ export async function render(c) {
   c.querySelector('#posCustomer').addEventListener('change', (e) => { state.cartMeta.customer_id = e.target.value; });
   c.querySelector('#posDiscount').addEventListener('input', (e) => { state.cartMeta.discount = Number(e.target.value) || 0; renderCart(); });
   c.querySelector('#posTax').addEventListener('input', (e) => { state.cartMeta.tax = Number(e.target.value) || 0; renderCart(); });
-  c.querySelector('#clearCart').addEventListener('click', () => { state.cart = []; renderCart(); });
+  c.querySelector('#clearCart').addEventListener('click', async () => {
+    if (!state.cart.length) return;
+    if (await confirmBox('هل تريد تفريغ السلة؟')) { state.cart = []; renderCart(); }
+  });
   c.querySelector('#payBtn').addEventListener('click', openPayment);
+  c.querySelector('#repeatSale').addEventListener('click', repeatLastSale);
+  c.querySelector('#suspendCart').addEventListener('click', suspendCart);
+  c.querySelector('#openSuspended').addEventListener('click', openSuspended);
   renderGrid('');
+  renderQuick();
+  renderLowStock();
   renderCart();
+  updateSuspendCount();
   setTimeout(() => search.focus(), 100);
 
+  if (window.__posCleanup) window.__posCleanup();
   document.addEventListener('keydown', globalScan);
-  c.addEventListener('DOMNodeRemoved', () => document.removeEventListener('keydown', globalScan));
   window.__posCleanup = () => document.removeEventListener('keydown', globalScan);
+}
 
-  function globalScan(e) {
-    if (window.location.hash.replace('#/', '') !== 'pos') return;
-    const target = e.target;
-    const inSearch = target && target.id === 'posSearch';
-    if (e.key === 'F9') { e.preventDefault(); openPayment(); return; }
-    if (e.key === 'F2') { e.preventDefault(); search.focus(); return; }
-    if (!inSearch && e.key.length === 1) {
-      const now = Date.now();
-      if (now - lastKeyTime > 400) scanBuffer = '';
-      lastKeyTime = now;
-      scanBuffer += e.key;
-      clearTimeout(scanTimer);
-      scanTimer = setTimeout(() => {
-        if (scanBuffer.length >= 4) {
-          addByCode(scanBuffer);
-          scanBuffer = '';
-        }
-      }, 120);
-    }
+function globalScan(e) {
+  if (window.location.hash.replace('#/', '') !== 'pos') return;
+  const target = e.target;
+  const tag = target && target.tagName ? target.tagName.toLowerCase() : '';
+  const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || (target && target.isContentEditable);
+  if (e.key === 'F9') { e.preventDefault(); openPayment(); return; }
+  if (e.key === 'F1' || e.key === 'F2') { e.preventDefault(); focusSearch(); return; }
+  if (e.key === 'F3') { e.preventDefault(); suspendCart(); return; }
+  if (e.key === 'F4') { e.preventDefault(); openSuspended(); return; }
+  if (e.key === 'F5') { e.preventDefault(); repeatLastSale(); return; }
+  if (e.key === 'Escape' && target && target.id === 'posSearch') { target.value = ''; renderGrid(''); return; }
+  if (!typing && e.key.length === 1) {
+    const now = Date.now();
+    if (now - lastKeyTime > 400) scanBuffer = '';
+    lastKeyTime = now;
+    scanBuffer += e.key;
+    clearTimeout(scanTimer);
+    scanTimer = setTimeout(() => {
+      if (scanBuffer.length >= 4) {
+        addByCode(scanBuffer);
+        scanBuffer = '';
+      }
+    }, 120);
   }
+}
+
+function focusSearch() {
+  const el = document.getElementById('posSearch');
+  if (el) { el.focus(); el.select(); }
+}
+
+function renderQuick() {
+  const box = document.getElementById('quickItems');
+  if (!box) return;
+  if (!quick.length) { box.innerHTML = '<div class="text-[11px] text-slate-400 py-1">لا توجد أصناف سريعة بعد</div>'; return; }
+  box.innerHTML = quick.map((p) => `
+    <button data-qid="${p.id}" class="shrink-0 border border-slate-200 rounded-xl px-3 py-2 text-right hover:border-zain-400 hover:bg-zain-50 transition-colors">
+      <div class="text-[11px] font-bold text-slate-700 max-w-[130px] truncate">${esc(p.name)}</div>
+      <div class="text-[11px] font-black text-zain-600 mt-0.5">${money(p.sale_price)}</div>
+      <div class="text-[10px] text-slate-400">${p.sold ? `مبيع ${Number(p.sold).toFixed(0)}` : 'جديد'}</div>
+    </button>`).join('');
+  box.querySelectorAll('[data-qid]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const p = products.find((x) => x.id === Number(btn.dataset.qid)) || quick.find((x) => x.id === Number(btn.dataset.qid));
+      addProduct(p);
+    });
+  });
+}
+
+function renderLowStock() {
+  const bar = document.getElementById('lowStockBar');
+  if (!bar) return;
+  if (!lowStock.length) { bar.innerHTML = ''; return; }
+  bar.innerHTML = `
+    <div class="card !border-amber-200 bg-amber-50 px-4 py-2.5 flex items-center justify-between gap-3">
+      <div class="text-[12px] font-bold text-amber-700 flex items-center gap-2 min-w-0">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <span class="truncate">${lowStock.length} صنف تحت الحد: ${esc(lowStock.slice(0, 4).map((p) => `${p.name} (${p.quantity})`).join('، '))}${lowStock.length > 4 ? ' …' : ''}</span>
+      </div>
+      <button id="lowStockMore" class="btn btn-warning btn-sm shrink-0">عرض الكل</button>
+    </div>`;
+  bar.querySelector('#lowStockMore').addEventListener('click', () => {
+    modal({
+      title: 'الأصناف التي وصلت للحد الأدنى',
+      size: 'max-w-lg',
+      body: `
+        <table class="w-full text-sm">
+          <thead><tr><th class="th">الصنف</th><th class="th">المتاح</th><th class="th">الحد الأدنى</th><th class="th">النقص</th></tr></thead>
+          <tbody>
+            ${lowStock.map((p) => `
+              <tr>
+                <td class="td">${esc(p.name)}</td>
+                <td class="td font-black text-amber-600">${p.quantity}</td>
+                <td class="td">${p.reorder_level}</td>
+                <td class="td">${Math.max(0, p.reorder_level - p.quantity)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`,
+    });
+  });
 }
 
 function renderGrid(term) {
   const grid = document.getElementById('productGrid');
+  if (!grid) return;
   const t = (term || '').trim().toLowerCase();
   const list = (t
     ? products.filter((p) => (p.name || '').toLowerCase().includes(t) || (p.barcode || '').includes(t) || (p.part_number || '').toLowerCase().includes(t))
@@ -155,9 +259,21 @@ function priceFor(p) {
 
 export function addProduct(p) {
   if (!p) return;
+  const stock = Number(p.quantity);
+  if (Number.isFinite(stock) && stock <= 0) {
+    toast(`نفد مخزون: ${p.name}`, 'error');
+    return;
+  }
   const existing = state.cart.find((i) => i.product_id === p.id);
-  if (existing) existing.qty += 1;
-  else state.cart.push({ product_id: p.id, name: p.name, unit: p.unit, qty: 1, unit_price: priceFor(p), cost_price: p.cost_price, discount: 0, stock: p.quantity });
+  if (existing) {
+    if (Number.isFinite(stock) && existing.qty + 1 > stock) {
+      toast(`الكمية المتاحة من ${p.name} هي ${stock}`, 'error');
+      return;
+    }
+    existing.qty += 1;
+  } else {
+    state.cart.push({ product_id: p.id, name: p.name, unit: p.unit, qty: 1, unit_price: priceFor(p), cost_price: p.cost_price, discount: 0, stock });
+  }
   renderCart();
 }
 
@@ -210,6 +326,135 @@ function updateTotals() {
   set('sumSub', t.sub);
   set('sumDisc', t.itemsDisc + Number(state.cartMeta.discount || 0));
   set('sumTotal', t.total);
+}
+
+function loadSuspended() {
+  try {
+    const raw = localStorage.getItem(SUSPEND_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+function saveSuspended(list) {
+  try { localStorage.setItem(SUSPEND_KEY, JSON.stringify(list.slice(-10))); } catch { }
+}
+
+function updateSuspendCount() {
+  const el = document.getElementById('suspendCount');
+  if (el) el.textContent = String(loadSuspended().length);
+}
+
+function suspendCart() {
+  if (!state.cart.length) { toast('السلة فارغة', 'error'); return; }
+  const list = loadSuspended();
+  list.push({
+    id: Date.now(),
+    at: new Date().toISOString(),
+    items: state.cart.map((i) => ({ ...i })),
+    meta: { ...state.cartMeta },
+    total: totals().total,
+  });
+  saveSuspended(list);
+  state.cart = [];
+  state.cartMeta = { ...state.cartMeta, customer_id: '', discount: 0, tax: 0 };
+  const customerEl = document.getElementById('posCustomer');
+  if (customerEl) customerEl.value = '';
+  const disc = document.getElementById('posDiscount');
+  if (disc) disc.value = '0';
+  const tax = document.getElementById('posTax');
+  if (tax) tax.value = '0';
+  renderCart();
+  updateSuspendCount();
+  toast('تم تعليق السلة — يمكنك استئنافها لاحقاً', 'success');
+}
+
+function openSuspended() {
+  const list = loadSuspended();
+  modal({
+    title: 'السلال المعلّقة',
+    size: 'max-w-lg',
+    body: list.length ? `
+      <div class="space-y-2">
+        ${list.map((s) => `
+          <div class="card p-3 flex items-center justify-between gap-3" data-sus="${s.id}">
+            <div class="min-w-0">
+              <div class="font-bold text-sm truncate">${s.items.length} صنف — ${money(s.total)}</div>
+              <div class="text-[11px] text-slate-400">${esc(s.items.map((i) => i.name).slice(0, 3).join('، '))} · ${new Date(s.at).toLocaleString('ar-IQ')}</div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <button data-resume="${s.id}" class="btn btn-primary btn-sm">استئناف</button>
+              <button data-drop="${s.id}" class="btn btn-ghost btn-sm text-rose-500"><i class="bi bi-trash3"></i></button>
+            </div>
+          </div>`).join('')}
+      </div>` : '<div class="text-center text-slate-400 py-8 text-sm">لا توجد سلال معلّقة</div>',
+    onMount(wrap, close) {
+      wrap.querySelectorAll('[data-resume]').forEach((btn) => btn.addEventListener('click', () => {
+        resumeCart(Number(btn.dataset.resume));
+        close();
+      }));
+      wrap.querySelectorAll('[data-drop]').forEach((btn) => btn.addEventListener('click', () => {
+        saveSuspended(loadSuspended().filter((s) => s.id !== Number(btn.dataset.drop)));
+        updateSuspendCount();
+        close();
+        openSuspended();
+      }));
+    },
+  });
+}
+
+async function resumeCart(id) {
+  const list = loadSuspended();
+  const entry = list.find((s) => s.id === id);
+  if (!entry) return;
+  saveSuspended(list.filter((s) => s.id !== id));
+  state.cart = entry.items.map((i) => ({ ...i }));
+  state.cartMeta = { ...state.cartMeta, ...entry.meta };
+  const customerEl = document.getElementById('posCustomer');
+  if (customerEl) customerEl.value = state.cartMeta.customer_id || '';
+  const disc = document.getElementById('posDiscount');
+  if (disc) disc.value = String(state.cartMeta.discount || 0);
+  const tax = document.getElementById('posTax');
+  if (tax) tax.value = String(state.cartMeta.tax || 0);
+  const mode = document.getElementById('posMode');
+  if (mode) mode.value = state.cartMeta.pos_mode || 'fast';
+  await refreshProducts();
+  renderCart();
+  updateSuspendCount();
+  toast('تم استئناف السلة', 'success');
+}
+
+async function repeatLastSale() {
+  try {
+    const res = await api('GET', '/api/sales/last');
+    let added = 0;
+    let missing = 0;
+    for (const it of res.items) {
+      let p = products.find((x) => x.id === it.product_id);
+      if (!p) {
+        p = await api('GET', `/api/products/${it.product_id}`).then((r) => r.product).catch(() => null);
+        if (p) products.unshift(p);
+      }
+      if (!p) { missing += 1; continue; }
+      const qty = Math.max(1, Number(it.qty) || 1);
+      const existing = state.cart.find((i) => i.product_id === p.id);
+      if (existing) existing.qty += qty;
+      else state.cart.push({ product_id: p.id, name: p.name, unit: p.unit, qty, unit_price: Number(it.unit_price) || priceFor(p), cost_price: p.cost_price, discount: Number(it.discount) || 0, stock: p.quantity });
+      added += 1;
+    }
+    if (!added) { toast(missing ? 'أصناف الفاتورة السابقة لم تعد متوفرة' : 'تعذر تحميل الفاتورة', 'error'); return; }
+    renderCart();
+    toast(`تم تحميل فاتورة ${res.invoice.invoice_no} (${added} صنف)${missing ? ` — ${missing} صنف غير متوفر` : ''}`, 'success');
+  } catch (err) {
+    toast(err.message || 'لا توجد فاتورة سابقة', 'error');
+  }
+}
+
+async function refreshProducts() {
+  try {
+    const r = await api('GET', '/api/products?page_size=300');
+    products = r.rows;
+  } catch { }
 }
 
 function openPayment() {
@@ -318,7 +563,7 @@ async function afterSale(res) {
   state.cart = [];
   const invId = res.invoice.id;
   await Promise.all([
-    api('GET', '/api/products?page_size=300').then((r) => { products = r.rows; }).catch(() => {}),
+    refreshProducts(),
     api('GET', '/api/shifts/current').then((r) => { state.shift = r.shift; renderShiftBadge(); }).catch(() => {}),
   ]);
   renderCart();
@@ -329,5 +574,5 @@ async function afterSale(res) {
 
 function renderShiftBadge() {
   const el = document.getElementById('shiftText');
-  if (el) el.textContent = state.shift ? `وردية مفتوحة` : 'فتح وردية';
+  if (el) el.textContent = state.shift ? `وردية مفتوحة` : `فتح وردية`;
 }

@@ -69,6 +69,46 @@ module.exports = {
       sendJson(ctx.res, 200, { product: parseJsonFields(product, ['units']) });
     });
 
+    router.get('/api/products/quick', (ctx) => {
+      const limit = Math.min(Number(ctx.query.limit) || 12, 40);
+      const days = Math.min(Number(ctx.query.days) || 30, 365);
+      let rows = db.all(
+        `SELECT p.id, p.name, p.barcode, p.part_number, p.category, p.unit, p.sale_price, p.wholesale_price,
+                p.cost_price, p.quantity, p.reorder_level, p.is_active,
+                COALESCE(SUM(ii.qty), 0) AS sold
+         FROM invoice_items ii
+         JOIN invoices i ON i.id = ii.invoice_id
+         JOIN products p ON p.id = ii.product_id
+         WHERE i.type = 'sale' AND date(i.created_at) >= date('now','localtime', ?)
+         GROUP BY p.id
+         ORDER BY sold DESC, p.name ASC
+         LIMIT ?`,
+        [`-${days} days`, limit]
+      );
+      if (!rows.length) {
+        rows = db.all(
+          `SELECT id, name, barcode, part_number, category, unit, sale_price, wholesale_price,
+                  cost_price, quantity, reorder_level, is_active, 0 AS sold
+           FROM products WHERE is_active = 1 ORDER BY id DESC LIMIT ?`,
+          [limit]
+        );
+      }
+      sendJson(ctx.res, 200, { rows });
+    });
+
+    router.get('/api/products/low-stock', (ctx) => {
+      const limit = Math.min(Number(ctx.query.limit) || 20, 100);
+      const rows = db.all(
+        `SELECT id, name, barcode, category, unit, quantity, reorder_level, sale_price
+         FROM products
+         WHERE is_active = 1 AND quantity <= reorder_level
+         ORDER BY (quantity - reorder_level) ASC, name ASC
+         LIMIT ?`,
+        [limit]
+      );
+      sendJson(ctx.res, 200, { rows });
+    });
+
     router.get('/api/products/:id/movements', (ctx) => {
       const rows = db.all(
         `SELECT m.*, u.full_name AS user_name FROM stock_movements m

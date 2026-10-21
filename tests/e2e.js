@@ -209,6 +209,16 @@ const { start } = require('../src/server/index.js');
   r = await call('GET', '/api/sales/1', null, token);
   ok('invoice detail carries profit', typeof r.data.invoice.profit === 'number' && typeof r.data.invoice.cost_total === 'number', JSON.stringify({ p: r.data.invoice.profit, c: r.data.invoice.cost_total }));
 
+  r = await call('GET', '/api/products/quick?limit=5', null, token);
+  ok('quick products', r.status === 200 && Array.isArray(r.data.rows) && r.data.rows.length > 0, String(r.status));
+  ok('quick products carry sold qty', r.data.rows.every((x) => typeof x.sold === 'number'), JSON.stringify(r.data.rows[0] && r.data.rows[0].sold));
+  r = await call('GET', '/api/products/low-stock?limit=10', null, token);
+  ok('low stock list', r.status === 200 && Array.isArray(r.data.rows), String(r.status));
+  ok('low stock respects reorder level', r.data.rows.every((x) => Number(x.quantity) <= Number(x.reorder_level)), JSON.stringify(r.data.rows[0] || null));
+  r = await call('GET', '/api/sales/last', null, token);
+  ok('last sale', r.status === 200 && r.data.invoice && Array.isArray(r.data.items), String(r.status));
+  ok('last sale items match invoice', r.data.items.every((i) => i.invoice_id === r.data.invoice.id), JSON.stringify(r.data.items[0] || null));
+
   r = await call('GET', '/api/backup', null, token);
   ok('backup list', r.status === 200 && Array.isArray(r.data.backups), r.status);
   r = await call('POST', '/api/backup', null, token);

@@ -293,6 +293,17 @@ module.exports = {
       sendJson(ctx.res, 200, { rows, total: total.c, sum_total: total.sum_total, page: Number(page), page_size: limit });
     });
 
+    router.get('/api/sales/last', (ctx) => {
+      const invoice = db.get(
+        `SELECT i.*, c.name AS customer_name
+         FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id
+         WHERE i.type = 'sale' ORDER BY i.id DESC LIMIT 1`
+      );
+      if (!invoice) throw new HttpError(404, 'لا توجد فواتير بيع سابقة');
+      const items = db.all('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY id', [invoice.id]);
+      sendJson(ctx.res, 200, { invoice, items });
+    });
+
     router.get('/api/sales/:id', (ctx) => {
       const invoice = db.get(
         `SELECT i.*, c.name AS customer_name, c.phone AS customer_phone, s.name AS supplier_name,
