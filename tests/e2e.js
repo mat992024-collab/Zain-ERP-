@@ -219,6 +219,75 @@ const { start } = require('../src/server/index.js');
   ok('last sale', r.status === 200 && r.data.invoice && Array.isArray(r.data.items), String(r.status));
   ok('last sale items match invoice', r.data.items.every((i) => i.invoice_id === r.data.invoice.id), JSON.stringify(r.data.items[0] || null));
 
+  r = await call('GET', `/api/customers/${cid}`, null, token);
+  const balanceBefore = Number(r.data.customer.balance);
+  r = await call('GET', '/api/treasury', null, token);
+  const treasuryBefore = Number(r.data.balance);
+  r = await call('POST', '/api/vouchers', { type: 'receipt', amount: 100000, partner_type: 'customer', partner_id: cid, method: 'cash', description: 'سند قبض اختبار' }, token);
+  const receiptId = r.data.voucher && r.data.voucher.id;
+  ok('receipt voucher created', r.status === 201 && r.data.voucher.type === 'receipt' && r.data.voucher.voucher_no.startsWith('RCV-'), JSON.stringify(r.data.voucher && r.data.voucher.voucher_no));
+  r = await call('GET', `/api/customers/${cid}`, null, token);
+  ok('receipt reduced customer balance', Math.abs(Number(r.data.customer.balance) - (balanceBefore - 100000)) < 0.01, `${balanceBefore} -> ${r.data.customer.balance}`);
+  r = await call('GET', '/api/treasury', null, token);
+  ok('receipt increased treasury', Math.abs(Number(r.data.balance) - (treasuryBefore + 100000)) < 0.01, `${treasuryBefore} -> ${r.data.balance}`);
+
+  r = await call('GET', `/api/suppliers/${sid}`, null, token);
+  const supplierBefore = Number(r.data.supplier.balance);
+  r = await call('POST', '/api/vouchers', { type: 'payout', amount: 50000, partner_type: 'supplier', partner_id: sid, method: 'cash', description: 'سند صرف اختبار' }, token);
+  const payoutId = r.data.voucher && r.data.voucher.id;
+  ok('payout voucher created', r.status === 201 && r.data.voucher.type === 'payout', JSON.stringify(r.data.voucher && r.data.voucher.voucher_no));
+  r = await call('GET', `/api/suppliers/${sid}`, null, token);
+  ok('payout increased supplier balance', Math.abs(Number(r.data.supplier.balance) - (supplierBefore + 50000)) < 0.01, `${supplierBefore} -> ${r.data.supplier.balance}`);
+
+  r = await call('POST', '/api/vouchers', { type: 'transfer', amount: 25000, from_account: '1100', to_account: '2100', description: 'نقل اختبار' }, token);
+  const transferId = r.data.voucher && r.data.voucher.id;
+  ok('transfer voucher created', r.status === 201 && r.data.voucher.type === 'transfer', JSON.stringify(r.data.voucher && r.data.voucher.voucher_no));
+  r = await call('POST', '/api/vouchers', { type: 'transfer', amount: 1000, from_account: '1100', to_account: '9999' }, token);
+  ok('transfer rejects unknown account (400)', r.status === 400, String(r.status));
+  r = await call('POST', '/api/vouchers', { type: 'receipt', amount: 0 }, token);
+  ok('voucher rejects zero amount (400)', r.status === 400, String(r.status));
+
+  r = await call('GET', '/api/vouchers', null, token);
+  ok('vouchers list', r.status === 200 && r.data.rows.length >= 3, 'rows=' + r.data.rows.length);
+  r = await call('GET', '/api/vouchers?type=receipt', null, token);
+  ok('vouchers filter by type', r.data.rows.every((v) => v.type === 'receipt'), JSON.stringify(r.data.rows.map((v) => v.type)));
+
+  r = await call('GET', '/api/treasury', null, token);
+  const treasuryBeforeDelete = Number(r.data.balance);
+  r = await call('POST', '/api/vouchers', { type: 'receipt', amount: 33333, partner_type: 'customer', partner_id: cid, method: 'cash', description: 'سند للاختبار' }, token);
+  const tempVoucherId = r.data.voucher && r.data.voucher.id;
+  r = await call('GET', `/api/customers/${cid}`, null, token);
+  const balanceBeforeTemp = Number(r.data.customer.balance);
+  r = await call('DELETE', `/api/vouchers/${tempVoucherId}`, null, token);
+  ok('voucher deleted', r.status === 200 && r.data.ok === true, String(r.status));
+  r = await call('GET', `/api/customers/${cid}`, null, token);
+  ok('deleting voucher restored customer balance', Math.abs(Number(r.data.customer.balance) - (balanceBeforeTemp + 33333)) < 0.01, `${balanceBeforeTemp + 33333} -> ${r.data.customer.balance}`);
+  r = await call('GET', '/api/treasury', null, token);
+  ok('deleting voucher restored treasury', Math.abs(Number(r.data.balance) - treasuryBeforeDelete) < 0.01, `${treasuryBeforeDelete} -> ${r.data.balance}`);
+  r = await call('DELETE', `/api/vouchers/${payoutId}`, null, token);
+  ok('payout voucher deleted', r.status === 200, String(r.status));
+
+  r = await call('GET', '/api/reports/z-report', null, token);
+  ok('z-report', r.status === 200 && r.data.sales && typeof r.data.sales.total === 'number' && typeof r.data.expected_cash === 'number', String(r.status));
+  ok('z-report net sales', Math.abs(r.data.net_sales - (r.data.sales.total - r.data.returns.total)) < 0.01, JSON.stringify({ n: r.data.net_sales, s: r.data.sales.total }));
+  r = await call('GET', '/api/reports/z-report?date=2000-01-01', null, token);
+  ok('z-report for empty day', r.status === 200 && r.data.sales.count === 0, String(r.status));
+
+  const soon = new Date();
+  soon.setDate(soon.getDate() + 5);
+  const expDate = soon.toISOString().slice(0, 10);
+  r = await call('POST', '/api/products', { name: 'لبن منتهي قريباً', category: 'ألبان', sale_price: 2000, cost_price: 1500, quantity: 12, track_expiry: 1, expiry_date: expDate }, token);
+  ok('expiry product created', r.status === 201, String(r.status));
+  r = await call('GET', '/api/reports/expiring?days=30', null, token);
+  ok('expiry report', r.status === 200 && r.data.rows.some((x) => x.name === 'لبن منتهي قريباً'), JSON.stringify(r.data.summary));
+  ok('expiry report status', r.data.rows.find((x) => x.name === 'لبن منتهي قريباً').status === 'critical', JSON.stringify(r.data.rows.map((x) => x.status)));
+  r = await call('GET', '/api/reports/expiring?days=1', null, token);
+  ok('expiry report respects window', !r.data.rows.some((x) => x.name === 'لبن منتهي قريباً'), JSON.stringify(r.data.rows.map((x) => x.name)));
+  r = await call('GET', `/api/print/voucher/${transferId}`, null, token);
+  ok('voucher print HTML', r.status === 200 && String(r.data).includes('سند'), String(r.status));
+  r = await call('GET', '/api/print/z-report', null, token);
+  ok('z-report print HTML', r.status === 200 && String(r.data).includes('تقرير Z'), String(r.status));
+
   r = await call('GET', '/api/backup', null, token);
   ok('backup list', r.status === 200 && Array.isArray(r.data.backups), r.status);
   r = await call('POST', '/api/backup', null, token);

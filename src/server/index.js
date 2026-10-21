@@ -16,6 +16,7 @@ const MODULES = [
   require('./modules/suppliers.routes'),
   require('./modules/sales.routes'),
   require('./modules/statements.routes'),
+  require('./modules/vouchers.routes'),
   require('./modules/accounting.routes'),
   require('./modules/shifts.routes'),
   require('./modules/users.routes'),

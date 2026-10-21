@@ -3,6 +3,7 @@ const { sendJson, sendText } = require('../core/http');
 const code128 = require('../core/code128');
 const statements = require('./statements.routes');
 const accounting = require('./accounting.routes');
+const vouchers = require('./vouchers.routes');
 
 function esc(str = '') {
   return String(str)
@@ -344,6 +345,119 @@ module.exports = {
           <div style="text-align:left">المدير: ....................</div>
         </footer>`;
       sendText(ctx.res, 200, htmlDoc('قائمة الدخل', A4_CSS, body), 'text/html; charset=utf-8');
+    });
+
+    router.get('/api/print/voucher/:id', (ctx) => {
+      const voucher = db.get(
+        `SELECT v.*, u.full_name AS user_name FROM vouchers v LEFT JOIN users u ON u.id = v.user_id WHERE v.id = ?`,
+        [ctx.params.id]
+      );
+      if (!voucher) return sendText(ctx.res, 404, 'السند غير موجود', 'text/plain; charset=utf-8');
+      const settings = db.getSettings();
+      const cur = settings.currency_symbol || 'د.ع';
+      const labels = { receipt: 'سند قبض', payout: 'سند صرف', transfer: 'سند نقل' };
+      const accountName = (code) => {
+        if (!code) return '-';
+        const a = db.get('SELECT name FROM accounts WHERE code = ?', [code]);
+        return a ? `${code} - ${a.name}` : code;
+      };
+      const body = `
+        <header>
+          <div>
+            <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
+            <div style="font-size:13px;color:#475569;margin-top:6px">
+              ${esc(settings.company_address || '')}<br/>
+              ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
+            </div>
+          </div>
+          <div class="meta">
+            <span class="badge">${esc(labels[voucher.type] || voucher.type)}</span><br/><br/>
+            رقم السند: ${esc(voucher.voucher_no)}<br/>
+            التاريخ: ${esc(voucher.date || voucher.created_at)}<br/>
+            ${voucher.user_name ? 'المستخدم: ' + esc(voucher.user_name) + '<br/>' : ''}
+          </div>
+        </header>
+        <div class="cards">
+          <div class="box"><div class="lbl">المبلغ</div><div class="val">${money(voucher.amount, cur)}</div></div>
+          <div class="box"><div class="lbl">${voucher.type === 'transfer' ? 'من حساب' : 'الطرف'}</div><div class="val" style="font-size:14px">${esc(voucher.type === 'transfer' ? accountName(voucher.from_account) : (voucher.partner_name || '—'))}</div></div>
+          <div class="box"><div class="lbl">${voucher.type === 'transfer' ? 'إلى حساب' : 'طريقة الدفع'}</div><div class="val" style="font-size:14px">${esc(voucher.type === 'transfer' ? accountName(voucher.to_account) : (voucher.method === 'cash' ? 'نقدي' : voucher.method === 'card' ? 'بطاقة' : voucher.method))}</div></div>
+        </div>
+        <table class="items">
+          <tbody>
+            <tr><th style="width:180px">البيان</th><td>${esc(voucher.description || labels[voucher.type] || '')}</td></tr>
+            <tr><th>المبلغ كتابةً</th><td>${esc((Number(voucher.amount) || 0).toLocaleString('ar-IQ'))} ${esc(cur)}</td></tr>
+          </tbody>
+        </table>
+        <footer>
+          <div>${esc(settings.receipt_footer || '')}</div>
+          <div style="display:flex;gap:60px">
+            <span>المستلم: ....................</span>
+            <span>المحاسب: ....................</span>
+            <span>المدير: ....................</span>
+          </div>
+        </footer>`;
+      sendText(ctx.res, 200, htmlDoc(labels[voucher.type] || 'سند', A4_CSS, body), 'text/html; charset=utf-8');
+    });
+
+    router.get('/api/print/z-report', (ctx) => {
+      const data = vouchers.buildZReport(ctx.query.date);
+      const settings = db.getSettings();
+      const cur = settings.currency_symbol || 'د.ع';
+      const productRows = data.top_products.map((p) => `
+        <tr><td>${esc(p.name)}</td><td style="text-align:left">${p.qty}</td><td style="text-align:left">${money(p.total, '')}</td></tr>`).join('');
+      const hourRows = data.hourly.map((h) => `
+        <tr><td>${esc(h.hour)}:00</td><td style="text-align:left">${h.count}</td><td style="text-align:left">${money(h.total, '')}</td></tr>`).join('');
+      const body = `
+        <header>
+          <div>
+            <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
+            <div style="font-size:13px;color:#475569;margin-top:6px">
+              ${esc(settings.company_address || '')}<br/>
+              ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
+            </div>
+          </div>
+          <div class="meta">
+            <span class="badge">تقرير Z</span><br/><br/>
+            التاريخ: ${esc(data.date)}<br/>
+            وقت الإصدار: ${esc(new Date(data.generated_at).toLocaleString('ar-IQ'))}
+          </div>
+        </header>
+        <div class="cards">
+          <div class="box"><div class="lbl">عدد الفواتير</div><div class="val">${data.sales.count}</div></div>
+          <div class="box"><div class="lbl">صافي المبيعات</div><div class="val">${money(data.net_sales, cur)}</div></div>
+          <div class="box"><div class="lbl">النقد المتوقع</div><div class="val">${money(data.expected_cash, cur)}</div></div>
+        </div>
+        <table class="items">
+          <thead><tr><th>البند</th><th style="text-align:left">المبلغ</th><th style="text-align:left">العدد</th></tr></thead>
+          <tbody>
+            <tr><td>مبيعات نقدية</td><td style="text-align:left">${money(data.sales.cash, '')}</td><td style="text-align:left">${data.sales.count}</td></tr>
+            <tr><td>مبيعات بطاقة</td><td style="text-align:left">${money(data.sales.card, '')}</td><td style="text-align:left"></td></tr>
+            <tr><td>مبيعات آجلة</td><td style="text-align:left">${money(data.sales.credit, '')}</td><td style="text-align:left"></td></tr>
+            <tr><td>مرتجعات</td><td style="text-align:left">-${money(data.returns.total, '')}</td><td style="text-align:left">${data.returns.count}</td></tr>
+            <tr><td><b>صافي المبيعات</b></td><td style="text-align:left"><b>${money(data.net_sales, '')}</b></td><td style="text-align:left"></td></tr>
+            <tr><td>مصروفات</td><td style="text-align:left">-${money(data.expenses.total, '')}</td><td style="text-align:left">${data.expenses.count}</td></tr>
+            <tr><td>سندات قبض</td><td style="text-align:left">+${money(data.vouchers.receipt.total, '')}</td><td style="text-align:left">${data.vouchers.receipt.count}</td></tr>
+            <tr><td>سندات صرف</td><td style="text-align:left">-${money(data.vouchers.payout.total, '')}</td><td style="text-align:left">${data.vouchers.payout.count}</td></tr>
+            <tr><td>سندات نقل</td><td style="text-align:left">${money(data.vouchers.transfer.total, '')}</td><td style="text-align:left">${data.vouchers.transfer.count}</td></tr>
+            <tr><td>حركة نقدية داخل/خارج</td><td style="text-align:left">${money(data.cash_movement.in, '')} / ${money(data.cash_movement.out, '')}</td><td style="text-align:left"></td></tr>
+            <tr><td><b>الرصيد النقدي المتوقع</b></td><td style="text-align:left"><b>${money(data.expected_cash, '')}</b></td><td style="text-align:left"></td></tr>
+          </tbody>
+        </table>
+        <h2 style="font-size:16px;margin:22px 0 8px">المبيعات حسب الساعة</h2>
+        <table class="items">
+          <thead><tr><th>الساعة</th><th style="text-align:left">العدد</th><th style="text-align:left">المبلغ</th></tr></thead>
+          <tbody>${hourRows || '<tr><td colspan="3" style="text-align:center;padding:16px">لا توجد مبيعات</td></tr>'}</tbody>
+        </table>
+        <h2 style="font-size:16px;margin:22px 0 8px">الأصناف الأكثر مبيعاً</h2>
+        <table class="items">
+          <thead><tr><th>الصنف</th><th style="text-align:left">الكمية</th><th style="text-align:left">المبلغ</th></tr></thead>
+          <tbody>${productRows || '<tr><td colspan="3" style="text-align:center;padding:16px">لا توجد مبيعات</td></tr>'}</tbody>
+        </table>
+        <footer>
+          <div>${esc(settings.receipt_footer || '')}</div>
+          <div style="text-align:left">مدير المبيعات: ....................</div>
+        </footer>`;
+      sendText(ctx.res, 200, htmlDoc('تقرير Z', A4_CSS, body), 'text/html; charset=utf-8');
     });
 
     router.get('/api/print/barcode/:productId', (ctx) => {

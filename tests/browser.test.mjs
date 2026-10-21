@@ -270,6 +270,37 @@ async function main() {
   const incomeText = await evalJs(`document.getElementById('accPane').innerText`);
   check('income statement tab renders', /مجمل الربح/.test(incomeText) && /صافي الربح/.test(incomeText), incomeText.slice(0, 60).replace(/\n/g, ' '));
 
+  phase = 'vouchers';
+  await evalJs(`location.hash = '#/accounting'`);
+  await sleep(1500);
+  await evalJs(`(function(){const b=[...document.querySelectorAll('[data-tab]')].find(x=>x.dataset.tab==='vouchers');if(b)b.click();})()`);
+  const voucherPaneReady = await waitFor(`!!document.getElementById('vcAdd')`, 40);
+  const voucherPane = await evalJs(`document.getElementById('accPane').innerText`);
+  check('vouchers tab renders', voucherPaneReady === true && /سندات القبض/.test(voucherPane), voucherPane.slice(0, 60).replace(/\n/g, ' '));
+  await evalJs(`document.getElementById('vcAdd').click()`);
+  const voucherModal = await waitFor(`!!document.getElementById('vcSave')`, 40);
+  check('new voucher modal opens', voucherModal === true);
+  await evalJs(`(function(){const a=document.getElementById('vcAmount');a.value='12345';a.dispatchEvent(new Event('input'));const d=document.getElementById('vcDesc');d.value='سند اختبار المتصفح';})()`);
+  await evalJs(`document.getElementById('vcSave').click()`);
+  const voucherSaved = await waitFor(`!!document.getElementById('accPane') && /سند اختبار المتصفح/.test(document.getElementById('accPane').innerText)`, 40);
+  const voucherRows = await evalJs(`document.querySelectorAll('#accPane tbody tr').length`);
+  check('voucher saved and listed', voucherSaved === true && voucherRows > 0, 'rows=' + voucherRows);
+
+  phase = 'z-report';
+  await evalJs(`(function(){const b=[...document.querySelectorAll('[data-tab]')].find(x=>x.dataset.tab==='zreport');if(b)b.click();})()`);
+  const zReady = await waitFor(`!!document.getElementById('zrDate')`, 40);
+  const zText = await evalJs(`document.getElementById('accPane').innerText`);
+  check('z-report tab renders', zReady === true && /صافي المبيعات/.test(zText) && /النقد المتوقع/.test(zText), zText.slice(0, 60).replace(/\n/g, ' '));
+
+  phase = 'expiry-report';
+  await evalJs(`location.hash = '#/inventory'`);
+  await sleep(1500);
+  await evalJs(`document.getElementById('pExpiry').click()`);
+  const expiryOpen = await waitFor(`(function(){const b=[...document.querySelectorAll('.modal-backdrop')].pop();return b&&/تقرير انتهاء الصلاحية/.test(b.innerText);})()`, 40);
+  const expiryText = await evalJs(`(function(){const b=[...document.querySelectorAll('.modal-backdrop')].pop();return b?b.innerText:'';})()`);
+  check('expiry report modal opens', expiryOpen === true, expiryText.slice(0, 60).replace(/\n/g, ' '));
+  await evalJs(`(function(){const b=document.querySelector('.modal-backdrop [data-close]');if(b)b.click();})()`);
+
   phase = 'statement';
   await evalJs(`location.hash = '#/customers'`);
   await sleep(1500);
@@ -289,8 +320,7 @@ async function main() {
 
   phase = 'settings-modal';
   await evalJs(`document.getElementById('settingsBtn').click()`);
-  await sleep(700);
-  const settingsField = await evalJs(`!!document.querySelector('#set_company_name')`);
+  const settingsField = await waitFor(`!!document.getElementById('set_company_name')`, 40);
   check('settings modal opens', settingsField === true);
   await evalJs(`document.querySelector('.modal-backdrop [data-close], .modal-backdrop [data-cancel]') && document.querySelector('.modal-backdrop [data-close], .modal-backdrop [data-cancel]').click()`);
 
@@ -344,9 +374,14 @@ async function main() {
   fs.mkdirSync(dlDir, { recursive: true });
   await send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: dlDir }).catch(() => {});
   await evalJs(`document.querySelector('#sExport').click()`);
-  await sleep(3000);
-  const dlFiles = fs.existsSync(dlDir) ? fs.readdirSync(dlDir) : [];
-  const csvFile = dlFiles.find((f) => f.endsWith('.csv'));
+  let csvFile = null;
+  let dlFiles = [];
+  for (let i = 0; i < 40; i++) {
+    await sleep(250);
+    dlFiles = fs.existsSync(dlDir) ? fs.readdirSync(dlDir) : [];
+    csvFile = dlFiles.find((f) => f.endsWith('.csv'));
+    if (csvFile) break;
+  }
   check('CSV downloaded by the browser', !!csvFile, dlFiles.join(','));
   if (csvFile) {
     const body = fs.readFileSync(path.join(dlDir, csvFile));

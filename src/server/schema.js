@@ -273,6 +273,25 @@ CREATE TABLE IF NOT EXISTS activity_log (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS vouchers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  voucher_no TEXT NOT NULL UNIQUE,
+  type TEXT NOT NULL DEFAULT 'receipt',
+  amount REAL NOT NULL DEFAULT 0,
+  partner_type TEXT,
+  partner_id INTEGER,
+  partner_name TEXT,
+  from_account TEXT,
+  to_account TEXT,
+  method TEXT NOT NULL DEFAULT 'cash',
+  description TEXT,
+  user_id INTEGER,
+  shift_id INTEGER,
+  date TEXT NOT NULL DEFAULT (date('now','localtime')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at);

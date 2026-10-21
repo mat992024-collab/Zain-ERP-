@@ -3,11 +3,13 @@ import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint
 export async function renderAccounting(c) {
   const tabs = [
     { key: 'treasury', label: 'الخزنة', icon: 'bi-wallet2' },
+    { key: 'vouchers', label: 'السندات', icon: 'bi-file-earmark-text' },
     { key: 'expenses', label: 'المصروفات', icon: 'bi-receipt-cutoff' },
     { key: 'accounts', label: 'شجرة الحسابات', icon: 'bi-diagram-3' },
     { key: 'installments', label: 'الأقساط', icon: 'bi-calendar-check' },
     { key: 'partners', label: 'الشركاء', icon: 'bi-person-badge' },
     { key: 'income', label: 'قائمة الدخل', icon: 'bi-graph-up-arrow' },
+    { key: 'zreport', label: 'تقرير Z', icon: 'bi-clipboard2-check' },
     { key: 'trial', label: 'ميزان المراجعة', icon: 'bi-clipboard-data' },
   ];
   const exportMap = { treasury: 'treasury', expenses: 'expenses', accounts: 'accounts' };
@@ -34,7 +36,7 @@ export async function renderAccounting(c) {
   });
 
   const pane = () => c.querySelector('#accPane');
-  const open = (key) => ({ treasury: treasury, expenses: expenses, accounts: accounts, installments: installments, partners: partners, income: income, trial: trial }[key](pane()));
+  const open = (key) => ({ treasury: treasury, vouchers: vouchers, expenses: expenses, accounts: accounts, installments: installments, partners: partners, income: income, zreport: zreport, trial: trial }[key](pane()));
   treasury(pane());
 
   async function treasury(p) {
@@ -80,6 +82,177 @@ export async function renderAccounting(c) {
         },
       });
     });
+  }
+
+  async function vouchers(p) {
+    const data = await api('GET', '/api/vouchers?page_size=100');
+    const badge = { receipt: 'badge-ok', payout: 'badge-danger', transfer: 'badge-info' };
+    const label = { receipt: 'سند قبض', payout: 'سند صرف', transfer: 'سند نقل' };
+    const sum = (t) => data.rows.filter((r) => r.type === t).reduce((s, r) => s + Number(r.amount), 0);
+    p.innerHTML = `
+      <div class="grid grid-cols-3 gap-4 mb-4">
+        <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-box-arrow-in-down"></i></div><div><div class="kpi-value">${money(sum('receipt'))}</div><div class="kpi-label">سندات القبض</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-rose-100 text-rose-700"><i class="bi bi-box-arrow-up"></i></div><div><div class="kpi-value">${money(sum('payout'))}</div><div class="kpi-label">سندات الصرف</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-arrow-left-right"></i></div><div><div class="kpi-value">${money(sum('transfer'))}</div><div class="kpi-label">سندات النقل</div></div></div>
+      </div>
+      <div class="card">
+        <div class="p-4 flex justify-between items-center border-b border-slate-100">
+          <div class="font-black">سندات القبض والصرف والنقل</div>
+          <button id="vcAdd" class="btn btn-primary"><i class="bi bi-plus-lg"></i> سند جديد</button>
+        </div>
+        <div class="overflow-auto max-h-[55vh]"><table class="w-full">
+          <thead><tr><th class="th">رقم السند</th><th class="th">النوع</th><th class="th">التاريخ</th><th class="th">الطرف / الحساب</th><th class="th">البيان</th><th class="th">المبلغ</th><th class="th"></th></tr></thead>
+          <tbody>${data.rows.map((r) => `<tr class="tr">
+            <td class="td font-mono text-xs font-bold">${esc(r.voucher_no)}</td>
+            <td class="td"><span class="badge ${badge[r.type]}">${esc(label[r.type] || r.type)}</span></td>
+            <td class="td text-xs">${esc(r.date || r.created_at)}</td>
+            <td class="td">${esc(r.partner_name || (r.from_account ? `${esc(r.from_account)} → ${esc(r.to_account)}` : '-'))}</td>
+            <td class="td text-xs">${esc(r.description || '-')}</td>
+            <td class="td font-bold ${r.type === 'receipt' ? 'text-emerald-600' : r.type === 'payout' ? 'text-rose-600' : 'text-zain-700'}">${money(r.amount, '')}</td>
+            <td class="td">
+              <div class="flex items-center gap-2">
+                <button data-vprint="${r.id}" class="text-zain-600 hover:text-zain-800" title="طباعة"><i class="bi bi-printer"></i></button>
+                <button data-vdel="${r.id}" class="text-rose-400 hover:text-rose-600" title="إلغاء السند"><i class="bi bi-trash3"></i></button>
+              </div>
+            </td></tr>`).join('') || '<tr><td colspan="7" class="td text-center text-slate-400 py-8">لا توجد سندات</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+    p.querySelector('#vcAdd').addEventListener('click', () => newVoucher(p));
+    p.querySelectorAll('[data-vprint]').forEach((b) => b.addEventListener('click', () => openPrint(`/api/print/voucher/${b.dataset.vprint}`)));
+    p.querySelectorAll('[data-vdel]').forEach((b) => b.addEventListener('click', async () => {
+      if (!(await confirmBox('إلغاء السند وعكس أثره على الخزنة والحسابات؟'))) return;
+      try { await api('DELETE', `/api/vouchers/${b.dataset.vdel}`); toast('تم إلغاء السند', 'success'); vouchers(p); } catch (e) { toast(e.message, 'error'); }
+    }));
+  }
+
+  async function newVoucher(p) {
+    const [customers, suppliers, accounts] = await Promise.all([
+      api('GET', '/api/customers?page_size=300').then((r) => r.rows).catch(() => []),
+      api('GET', '/api/suppliers?page_size=300').then((r) => r.rows).catch(() => []),
+      api('GET', '/api/accounts').then((r) => r.accounts).catch(() => []),
+    ]);
+    modal({
+      title: 'سند جديد',
+      size: 'max-w-lg',
+      body: `
+        <div class="grid grid-cols-3 gap-2 mb-3">
+          <button data-vt="receipt" class="vt-btn btn btn-success">سند قبض</button>
+          <button data-vt="payout" class="vt-btn btn btn-ghost">سند صرف</button>
+          <button data-vt="transfer" class="vt-btn btn btn-ghost">سند نقل</button>
+        </div>
+        <div id="vcParty">
+          <div class="grid grid-cols-2 gap-2">
+            <div>${field('نوع الطرف', '<select id="vcPartnerType" class="field"><option value="customer">عميل</option><option value="supplier">مورد</option></select>')}</div>
+            <div>${field('الطرف', '<select id="vcPartner" class="field"></select>')}</div>
+          </div>
+          <div class="mt-2">${field('طريقة الدفع', '<select id="vcMethod" class="field"><option value="cash">نقدي</option><option value="card">بطاقة</option></select>')}</div>
+        </div>
+        <div id="vcAccounts" class="hidden grid-cols-2 gap-2">
+          <div>${field('من حساب', `<select id="vcFrom" class="field">${accounts.map((a) => `<option value="${esc(a.code)}">${esc(a.code)} - ${esc(a.name)}</option>`).join('')}</select>`)}</div>
+          <div>${field('إلى حساب', `<select id="vcTo" class="field">${accounts.map((a) => `<option value="${esc(a.code)}">${esc(a.code)} - ${esc(a.name)}</option>`).join('')}</select>`)}</div>
+        </div>
+        <div class="mt-2">${field('المبلغ', '<input id="vcAmount" type="number" class="field !text-lg font-bold" />')}</div>
+        <div class="mt-2">${field('البيان', '<input id="vcDesc" class="field" />')}</div>
+        <div class="mt-2">${field('التاريخ', `<input id="vcDate" type="date" value="${new Date().toLocaleDateString('en-CA')}" class="field" />`)}</div>`,
+      footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="vcSave" class="btn btn-primary">حفظ السند</button>`,
+      onMount(wrap, close) {
+        let type = 'receipt';
+        const partnerSel = wrap.querySelector('#vcPartner');
+        const fillPartners = () => {
+          const t = wrap.querySelector('#vcPartnerType').value;
+          const list = t === 'supplier' ? suppliers : customers;
+          partnerSel.innerHTML = `<option value="">— بدون —</option>` + list.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('');
+        };
+        fillPartners();
+        wrap.querySelector('#vcPartnerType').addEventListener('change', fillPartners);
+        wrap.querySelectorAll('[data-vt]').forEach((b) => b.addEventListener('click', () => {
+          type = b.dataset.vt;
+          wrap.querySelectorAll('[data-vt]').forEach((x) => { x.className = 'vt-btn btn btn-ghost'; });
+          b.className = `vt-btn btn btn-${type === 'receipt' ? 'success' : type === 'payout' ? 'danger' : 'primary'}`;
+          const isTransfer = type === 'transfer';
+          wrap.querySelector('#vcParty').classList.toggle('hidden', isTransfer);
+          wrap.querySelector('#vcAccounts').classList.toggle('hidden', !isTransfer);
+          wrap.querySelector('#vcAccounts').classList.toggle('grid', isTransfer);
+        }));
+        wrap.querySelector('[data-cancel]').addEventListener('click', close);
+        wrap.querySelector('#vcSave').addEventListener('click', async () => {
+          const body = {
+            type,
+            amount: Number(wrap.querySelector('#vcAmount').value),
+            description: wrap.querySelector('#vcDesc').value,
+            date: wrap.querySelector('#vcDate').value,
+          };
+          if (type === 'transfer') {
+            body.from_account = wrap.querySelector('#vcFrom').value;
+            body.to_account = wrap.querySelector('#vcTo').value;
+          } else {
+            body.partner_type = wrap.querySelector('#vcPartnerType').value;
+            body.partner_id = partnerSel.value || null;
+            body.method = wrap.querySelector('#vcMethod').value;
+          }
+          try {
+            await api('POST', '/api/vouchers', body);
+            toast('تم حفظ السند', 'success');
+            close();
+            vouchers(p);
+          } catch (e) { toast(e.message, 'error'); }
+        });
+      },
+    });
+  }
+
+  async function zreport(p) {
+    const date = p.querySelector('#zrDate') ? p.querySelector('#zrDate').value : new Date().toLocaleDateString('en-CA');
+    const data = await api('GET', `/api/reports/z-report?date=${encodeURIComponent(date)}`);
+    p.innerHTML = `
+      <div class="card p-4 mb-4 flex flex-wrap items-end gap-3">
+        <div><label class="label">التاريخ</label><input id="zrDate" type="date" class="field !w-40" value="${esc(date)}" /></div>
+        <button id="zrApply" class="btn btn-primary"><i class="bi bi-funnel"></i> عرض</button>
+        <button id="zrPrint" class="btn btn-ghost"><i class="bi bi-printer"></i> طباعة</button>
+      </div>
+      <div class="grid grid-cols-4 gap-4 mb-4">
+        <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-receipt"></i></div><div><div class="kpi-value">${data.sales.count}</div><div class="kpi-label">عدد الفواتير</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-cash-stack"></i></div><div><div class="kpi-value">${money(data.net_sales)}</div><div class="kpi-label">صافي المبيعات</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-amber-100 text-amber-700"><i class="bi bi-arrow-down-up"></i></div><div><div class="kpi-value">${money(data.cash_movement.in - data.cash_movement.out)}</div><div class="kpi-label">صافي حركة النقد</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-slate-100 text-slate-600"><i class="bi bi-safe"></i></div><div><div class="kpi-value">${money(data.expected_cash)}</div><div class="kpi-label">النقد المتوقع</div></div></div>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div class="card">
+          <div class="p-4 border-b border-slate-100 font-black">ملخص اليوم</div>
+          <div class="p-4 space-y-2 text-sm">
+            <div class="flex justify-between"><span>مبيعات نقدية</span><b>${money(data.sales.cash)}</b></div>
+            <div class="flex justify-between"><span>مبيعات بطاقة</span><b>${money(data.sales.card)}</b></div>
+            <div class="flex justify-between"><span>مبيعات آجلة</span><b>${money(data.sales.credit)}</b></div>
+            <div class="flex justify-between text-rose-600"><span>مرتجعات (${data.returns.count})</span><b>-${money(data.returns.total)}</b></div>
+            <div class="flex justify-between border-b border-dashed pb-2"><span class="font-bold">صافي المبيعات</span><b class="text-zain-700">${money(data.net_sales)}</b></div>
+            <div class="flex justify-between text-rose-600"><span>مصروفات (${data.expenses.count})</span><b>-${money(data.expenses.total)}</b></div>
+            <div class="flex justify-between text-emerald-600"><span>سندات قبض (${data.vouchers.receipt.count})</span><b>+${money(data.vouchers.receipt.total)}</b></div>
+            <div class="flex justify-between text-rose-600"><span>سندات صرف (${data.vouchers.payout.count})</span><b>-${money(data.vouchers.payout.total)}</b></div>
+            <div class="flex justify-between"><span>سندات نقل (${data.vouchers.transfer.count})</span><b>${money(data.vouchers.transfer.total)}</b></div>
+            <div class="flex justify-between border-t border-dashed pt-2"><span class="font-bold">الرصيد النقدي المتوقع</span><b class="text-zain-700">${money(data.expected_cash)}</b></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="p-4 border-b border-slate-100 font-black">المبيعات حسب الساعة</div>
+          <div class="overflow-auto max-h-72">
+            <table class="w-full">
+              <thead><tr><th class="th">الساعة</th><th class="th">العدد</th><th class="th">المبلغ</th></tr></thead>
+              <tbody>${data.hourly.map((h) => `<tr class="tr"><td class="td">${esc(h.hour)}:00</td><td class="td">${h.count}</td><td class="td font-bold">${money(h.total, '')}</td></tr>`).join('') || '<tr><td colspan="3" class="td text-center text-slate-400 py-6">لا توجد مبيعات</td></tr>'}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="card mt-4">
+        <div class="p-4 border-b border-slate-100 font-black">الأصناف الأكثر مبيعاً</div>
+        <div class="overflow-auto max-h-64">
+          <table class="w-full">
+            <thead><tr><th class="th">الصنف</th><th class="th">الكمية</th><th class="th">المبلغ</th></tr></thead>
+            <tbody>${data.top_products.map((x) => `<tr class="tr"><td class="td font-bold">${esc(x.name)}</td><td class="td">${num(x.qty)}</td><td class="td">${money(x.total, '')}</td></tr>`).join('') || '<tr><td colspan="3" class="td text-center text-slate-400 py-6">لا توجد مبيعات</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>`;
+    p.querySelector('#zrApply').addEventListener('click', () => zreport(p));
+    p.querySelector('#zrPrint').addEventListener('click', () => openPrint(`/api/print/z-report?date=${encodeURIComponent(date)}`));
   }
 
   async function expenses(p) {

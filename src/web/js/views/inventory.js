@@ -28,6 +28,7 @@ async function listView(c, { mode }) {
         <select id="pCategory" class="field !w-44"><option value="">كل الأصناف</option>${categories.map((x) => `<option value="${esc(x.name)}">${esc(x.name)} (${x.count})</option>`).join('')}</select>
         <label class="flex items-center gap-2 text-sm font-bold text-slate-600 cursor-pointer"><input type="checkbox" id="pLow" ${lowOnly ? 'checked' : ''} class="w-4 h-4 accent-rose-500" /> النواقص فقط</label>
         <div class="flex-1"></div>
+        <button id="pExpiry" class="btn btn-ghost"><i class="bi bi-hourglass-bottom"></i> تقرير الصلاحية</button>
         <button id="pLabel" class="btn btn-ghost"><i class="bi bi-tags"></i> ملصقات باركود</button>
         <button id="pExport" class="btn btn-ghost"><i class="bi bi-filetype-csv"></i> تصدير CSV</button>
         <button id="pBulk" class="btn btn-ghost"><i class="bi bi-percent"></i> تعديل أسعار</button>
@@ -98,6 +99,7 @@ async function listView(c, { mode }) {
   c.querySelector('#pNext').addEventListener('click', () => { page++; load(); });
   c.querySelector('#pAdd').addEventListener('click', () => productForm(null, { categories, suppliers, onSave: load }));
   c.querySelector('#pBulk').addEventListener('click', () => bulkForm(categories, load));
+  c.querySelector('#pExpiry').addEventListener('click', () => expiryReport());
   c.querySelector('#pLabel').addEventListener('click', () => labelsForm(null));
   c.querySelector('#pExport').addEventListener('click', async () => {
     try {
@@ -107,6 +109,39 @@ async function listView(c, { mode }) {
   });
 
   load();
+}
+
+async function expiryReport() {
+  const days = 30;
+  const data = await api('GET', `/api/reports/expiring?days=${days}`).catch(() => null);
+  if (!data) { toast('تعذر تحميل التقرير', 'error'); return; }
+  const status = {
+    expired: ['badge-danger', 'منتهي'],
+    critical: ['badge-warn', 'أقل من 7 أيام'],
+    warning: ['badge-info', 'قارب على الانتهاء'],
+  };
+  modal({
+    title: `تقرير انتهاء الصلاحية (${days} يوم)`,
+    size: 'max-w-3xl',
+    body: `
+      <div class="grid grid-cols-4 gap-3 mb-4">
+        <div class="kpi"><div class="kpi-value text-rose-600">${data.summary.expired}</div><div class="kpi-label">منتهي</div></div>
+        <div class="kpi"><div class="kpi-value text-amber-600">${data.summary.critical}</div><div class="kpi-label">أقل من 7 أيام</div></div>
+        <div class="kpi"><div class="kpi-value text-zain-700">${data.summary.warning}</div><div class="kpi-label">قارب على الانتهاء</div></div>
+        <div class="kpi"><div class="kpi-value">${money(data.summary.value_at_risk)}</div><div class="kpi-label">قيمة المخزون المعرّض</div></div>
+      </div>
+      <div class="overflow-auto max-h-96"><table class="w-full">
+        <thead><tr><th class="th">الصنف</th><th class="th">التصنيف</th><th class="th">الكمية</th><th class="th">تاريخ الصلاحية</th><th class="th">المتبقي</th><th class="th">الحالة</th></tr></thead>
+        <tbody>${data.rows.map((r) => `<tr class="tr">
+          <td class="td font-bold">${esc(r.name)}</td>
+          <td class="td">${esc(r.category || '-')}</td>
+          <td class="td">${num(r.quantity)}</td>
+          <td class="td text-xs">${esc(r.expiry_date)}</td>
+          <td class="td font-bold ${r.days_left < 0 ? 'text-rose-600' : 'text-amber-600'}">${r.days_left === null ? '-' : (r.days_left < 0 ? `منتهٍ منذ ${Math.abs(r.days_left)} يوم` : `${r.days_left} يوم`)}</td>
+          <td class="td"><span class="badge ${(status[r.status] || status.warning)[0]}">${(status[r.status] || status.warning)[1]}</span></td>
+        </tr>`).join('') || '<tr><td colspan="6" class="td text-center text-slate-400 py-8">لا توجد أصناف قاربت على الانتهاء</td></tr>'}</tbody>
+      </table></div>`,
+  });
 }
 
 function productForm(product, { categories, suppliers, onSave }) {
