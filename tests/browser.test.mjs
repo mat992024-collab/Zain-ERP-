@@ -204,6 +204,23 @@ async function main() {
   check('settings modal opens', settingsField === true);
   await evalJs(`document.querySelector('.modal-backdrop [data-close], .modal-backdrop [data-cancel]') && document.querySelector('.modal-backdrop [data-close], .modal-backdrop [data-cancel]').click()`);
 
+  phase = 'theme';
+  const themeBefore = await evalJs(`document.documentElement.dataset.theme || 'light'`);
+  await evalJs(`document.getElementById('themeBtn').click()`);
+  await sleep(800);
+  const themeAfter = await evalJs(`document.documentElement.dataset.theme`);
+  const themeSetting = await evalJs(`fetch('/api/settings',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.settings.theme)`, true);
+  const bodyBg = await evalJs(`getComputedStyle(document.body).backgroundColor`);
+  const bgLum = (bodyBg.match(/\d+/g) || ['255']).map(Number);
+  check('theme toggle switches to dark', themeBefore !== 'dark' && themeAfter === 'dark', `${themeBefore}->${themeAfter}`);
+  check('theme persisted in settings', themeSetting === 'dark', 'setting=' + themeSetting);
+  check('dark theme paints dark surfaces', bgLum[0] < 60, 'bg=' + bodyBg);
+  await evalJs(`document.getElementById('themeBtn').click()`);
+  await sleep(800);
+  const themeReset = await evalJs(`document.documentElement.dataset.theme`);
+  const bodyBg2 = await evalJs(`getComputedStyle(document.body).backgroundColor`);
+  check('theme toggles back to light', themeReset === 'light' && bodyBg2 !== bodyBg, 'theme=' + themeReset + ' bg=' + bodyBg2);
+
   phase = 'print';
   const saleId = await evalJs(`fetch('/api/sales?type=sale',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows[0].id)`, true);
   await nav(`${BASE}/api/print/thermal/${saleId}?width=80&token=${token}`);

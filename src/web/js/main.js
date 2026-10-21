@@ -1,4 +1,4 @@
-import { api, state, money, num, esc, toast, modal, field, hasPerm } from './core.js';
+import { api, state, money, num, esc, toast, modal, field, hasPerm, applyTheme, toggleTheme } from './core.js';
 import * as Pos from './views/pos.js';
 import { renderProducts, renderInventory } from './views/inventory.js';
 import { renderCustomers, renderSuppliers } from './views/contacts.js';
@@ -48,6 +48,7 @@ boot();
 
 async function boot() {
   document.getElementById('loginError').classList.add('hidden');
+  try { applyTheme(localStorage.getItem('zain_theme') || 'light'); } catch { }
   const form = document.querySelector('#auth form');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -87,6 +88,7 @@ async function enterApp() {
   const settingsRes = await api('GET', '/api/settings');
   state.settings = settingsRes.settings;
   state.modules = settingsRes.modules || [];
+  applyTheme(state.settings.theme === 'dark' ? 'dark' : 'light');
   await refreshShift();
 
   authEl.classList.add('hidden');
@@ -99,6 +101,7 @@ async function enterApp() {
   document.getElementById('shiftBtn').onclick = shiftAction;
   document.getElementById('posBtnTop').onclick = () => { location.hash = '#/pos'; };
   document.getElementById('refreshBtn').onclick = () => navigate(currentRoute(), true);
+  document.getElementById('themeBtn').onclick = () => toggleTheme();
   window.onhashchange = () => navigate(currentRoute());
   navigate(currentRoute());
 }

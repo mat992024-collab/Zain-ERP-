@@ -13,7 +13,7 @@ npm run serve          # الخادم فقط (المنفذ 4180 أو ZAIN_PORT)
 npm test               # 3 مجموعات: API + رسم شاشات + متصفح حقيقي
 npm run test:api       # tests/e2e.js            (41 فحصاً)
 npm run test:render    # tests/render.test.mjs   (12 فحصاً)
-npm run test:ui        # tests/browser.test.mjs  (32 فحصاً)
+npm run test:ui        # tests/browser.test.mjs  (36 فحصاً)
 npm run seed           # بيانات تجريبية
 npm run reset          # تصفير القاعدة
 ```
@@ -27,6 +27,7 @@ npm run reset          # تصفير القاعدة
 - التواريخ في SQLite: `datetime('now','localtime')`.
 - المبالغ: `Number(v || 0).toLocaleString('ar-IQ')` (دالة `money` في `core.js`).
 - RTL: `dir="rtl"` على `<html>`؛ التصميم من اليمين لليسار.
+- المظهر: `data-theme="light|dark"` على `<html>`؛ الألوان عبر متغيرات CSS في `:root` و`[data-theme="dark"]` (لا Tailwind `dark:`).
 - الواجهة الأمامية ESM: `src/web/js/**` (يوجد `src/web/js/package.json` بـ `{"type":"module"}`).
 - أيقونات: Bootstrap Icons محلي في `src/web/assets/vendor/` — لا CDN إطلاقاً.
 - الخط: Cairo محلي (`src/web/assets/vendor/cairo.css` + `fonts/`).
@@ -41,7 +42,7 @@ src/server/db.js             الاتصال + bootstrap (admin/admin)
 src/server/core/             http, auth, crud, ledger, code128
 src/server/modules/          13 وحدة مسارات (153 endpoint)
 src/web/index.html           الصدفة (login + shell + nav + content)
-src/web/js/core.js           state, api, toast, modal, money, esc, field, openPrint, hasPerm
+src/web/js/core.js           state, api, toast, modal, money, esc, field, openPrint, hasPerm, applyTheme, toggleTheme
 src/web/js/main.js           bootstrap, hash-router, NAV, dashboard, وردية, دخول/خروج
 src/web/js/views/            pos, inventory, contacts, sales, accounting, ai, admin
 src/web/styles.css           مصدر Tailwind (يبني assets/app.css)
@@ -50,5 +51,5 @@ tests/                       e2e.js, render.test.mjs, browser.test.mjs
 
 ## قبل أي commit
 1. `npm run build:css` إذا لزم.
-2. `npm test` يجب أن يمرّ بالكامل (41 + 12 + 32) بدون console errors.
+2. `npm test` يجب أن يمرّ بالكامل (41 + 12 + 36) بدون console errors.
 3. لا تدفع `data/` أو `node_modules/` (مستثناة في `.gitignore`).

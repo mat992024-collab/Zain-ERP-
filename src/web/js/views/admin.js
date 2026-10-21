@@ -1,4 +1,4 @@
-import { api, state, esc, toast, modal, confirmBox, field, emptyState, hasPerm } from '../core.js';
+import { api, state, esc, toast, modal, confirmBox, field, emptyState, hasPerm, applyTheme, currentTheme } from '../core.js';
 
 const PERMISSIONS = [
   { key: 'pos.sell', label: 'البيع في نقاط البيع' },
@@ -130,6 +130,12 @@ export async function openSettings() {
         ${field('عرض الملصق (mm)', `<input id="set_label_width_mm" type="number" class="field" value="${esc(s.label_width_mm)}" />`)}
         <div class="col-span-2">${field('تذييل الفاتورة', `<input id="set_receipt_footer" class="field" value="${esc(s.receipt_footer)}" />`)}</div>
 
+        <div class="col-span-2 font-black text-zain-700 border-b border-slate-100 pb-2 mt-2">المظهر</div>
+        ${field('مظهر الواجهة', `<select id="set_theme" class="field">
+          <option value="light" ${currentTheme() !== 'dark' ? 'selected' : ''}>فاتح</option>
+          <option value="dark" ${currentTheme() === 'dark' ? 'selected' : ''}>داكن</option>
+        </select>`)}
+
         <div class="col-span-2 font-black text-zain-700 border-b border-slate-100 pb-2 mt-2">المخزون ونقاط البيع</div>
         ${field('نمط البيع الافتراضي', `<select id="set_default_pos_mode" class="field">
           <option value="fast" ${s.default_pos_mode === 'fast' ? 'selected' : ''}>بيع سريع</option>
@@ -146,6 +152,8 @@ export async function openSettings() {
     onMount(wrap, close) {
       const cancel = wrap.querySelector('[data-cancel]');
       if (cancel) cancel.addEventListener('click', close);
+      const themeSel = wrap.querySelector('#set_theme');
+      if (themeSel) themeSel.addEventListener('change', () => applyTheme(themeSel.value));
       const save = wrap.querySelector('#setSave');
       if (!save) return;
       save.addEventListener('click', async () => {
@@ -156,6 +164,7 @@ export async function openSettings() {
           company_tax_id: wrap.querySelector('#set_company_tax_id').value,
           industry: wrap.querySelector('#set_industry').value,
           currency_symbol: wrap.querySelector('#set_currency_symbol').value,
+          theme: wrap.querySelector('#set_theme').value,
           printer_type: wrap.querySelector('#set_printer_type').value,
           label_width_mm: wrap.querySelector('#set_label_width_mm').value,
           receipt_footer: wrap.querySelector('#set_receipt_footer').value,

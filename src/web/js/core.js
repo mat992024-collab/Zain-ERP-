@@ -106,6 +106,32 @@ export function field(label, inner, hint = '') {
   return `<div><label class="label">${esc(label)}</label>${inner}${hint ? `<p class="text-[11px] text-slate-400 mt-1">${esc(hint)}</p>` : ''}</div>`;
 }
 
+export function currentTheme() {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+
+export function applyTheme(theme) {
+  const dark = theme === 'dark';
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  const icon = document.getElementById('themeIcon');
+  if (icon) icon.className = dark ? 'bi bi-sun' : 'bi bi-moon-stars';
+  const btn = document.getElementById('themeBtn');
+  if (btn) btn.title = dark ? 'الوضع الفاتح' : 'الوضع الداكن';
+  try { localStorage.setItem('zain_theme', dark ? 'dark' : 'light'); } catch { }
+  return dark ? 'dark' : 'light';
+}
+
+export async function toggleTheme() {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  if (!hasPerm('settings.write') && !hasPerm('*')) return next;
+  try {
+    const res = await api('PUT', '/api/settings', { theme: next });
+    if (res && res.settings) state.settings = res.settings;
+  } catch { }
+  return next;
+}
+
 export function printUrl(path) {
   const sep = path.includes('?') ? '&' : '?';
   return `${path}${sep}token=${encodeURIComponent(state.token)}`;
