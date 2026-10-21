@@ -6,6 +6,7 @@ import { renderSales, renderPurchases } from './views/sales.js';
 import { renderAccounting, renderShifts } from './views/accounting.js';
 import { renderAi, renderReports } from './views/ai.js';
 import { renderAdmin, openSettings } from './views/admin.js';
+import { renderReminders } from './views/reminders.js';
 
 const NAV = [
   { key: 'dashboard', name: 'لوحة التحكم', icon: 'bi-speedometer2', perm: null, route: 'dashboard' },
@@ -19,6 +20,7 @@ const NAV = [
   { key: 'shifts', name: 'الورديات', icon: 'bi-clock-history', perm: 'pos.shift', module: 'pos', route: 'shifts' },
   { key: 'ai', name: 'الذكاء الاصطناعي', icon: 'bi-cpu', perm: 'ai.use', module: 'ai', route: 'ai' },
   { key: 'reports', name: 'التقارير', icon: 'bi-bar-chart-line', perm: 'accounting.write', module: 'reports', route: 'reports' },
+  { key: 'reminders', name: 'التذكيرات', icon: 'bi-megaphone', perm: 'reminders.view', module: 'reminders', route: 'reminders' },
   { key: 'admin', name: 'الإدارة والصلاحيات', icon: 'bi-shield-lock', perm: 'admin.users', module: 'admin', route: 'admin' },
 ];
 
@@ -35,6 +37,7 @@ const ROUTES = {
   shifts: renderShifts,
   ai: renderAi,
   reports: renderReports,
+  reminders: renderReminders,
   admin: renderAdmin,
 };
 
@@ -213,6 +216,7 @@ function shiftAction() {
 
 async function renderDashboard(c) {
   const d = await api('GET', '/api/dashboard/overview');
+  const reminders = hasPerm('reminders.view') ? await api('GET', '/api/reminders/daily').catch(() => null) : null;
   const maxDay = Math.max(1, ...d.charts.map((x) => Number(x.total)));
   c.innerHTML = `
     <div class="kpi-row">
@@ -227,6 +231,18 @@ async function renderDashboard(c) {
       <div class="kpi"><div class="kpi-icon bg-cyan-100 text-cyan-700"><i class="bi bi-truck"></i></div><div><div class="kpi-value">${money(d.creditors)}</div><div class="kpi-label">مستحقات الموردين</div></div></div>
       <div class="kpi"><div class="kpi-icon bg-rose-100 text-rose-700"><i class="bi bi-receipt-cutoff"></i></div><div><div class="kpi-value">${money(d.expenses_today)}</div><div class="kpi-label">مصروفات اليوم</div></div></div>
     </div>
+    ${reminders ? `<div class="card p-4 mb-4 border-r-4 border-r-zain-500 flex items-center justify-between flex-wrap gap-3">
+      <div class="flex items-center gap-3">
+        <i class="bi bi-megaphone text-2xl text-zain-600"></i>
+        <div>
+          <div class="font-black">تذكير اليوم — ${esc(reminders.date)}</div>
+          <div class="text-xs text-slate-500 mt-0.5">
+            ${reminders.sections.length ? reminders.sections.map((s) => `<span class="badge badge-mute mr-1">${esc(s.title)}: ${s.items.length}</span>`).join('') : 'لا توجد تنبيهات اليوم'}
+          </div>
+        </div>
+      </div>
+      <a href="#/reminders" class="btn btn-primary btn-sm"><i class="bi bi-arrow-left-circle"></i> عرض التذكير</a>
+    </div>` : ''}
     <div class="grid grid-cols-12 gap-4">
       <div class="col-span-7 card p-4">
         <div class="font-black mb-4 flex items-center gap-2"><i class="bi bi-bar-chart text-zain-600"></i> مبيعات آخر 7 أيام</div>

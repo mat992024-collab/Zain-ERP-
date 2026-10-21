@@ -339,7 +339,8 @@ async function main() {
 
   phase = 'auto-backup';
   await evalJs(`location.hash = '#/admin'`);
-  await sleep(1500);
+  await waitFor(`!!document.getElementById('backupCard')`);
+  await sleep(600);
   const autoBox = await evalJs(`(function(){const el=document.getElementById('backupCard');return el?el.innerText:'';})()`);
   check('backup card shows auto backup section', /النسخ التلقائي اليومي/.test(autoBox), autoBox.slice(0, 60).replace(/\n/g, ' '));
   await evalJs(`(function(){const b=document.getElementById('bkAutoEnabled');b.checked=true;b.dispatchEvent(new Event('change'));const t=document.getElementById('bkAutoTime');t.value='01:15';t.dispatchEvent(new Event('input'));})()`);
@@ -476,6 +477,33 @@ async function main() {
   await sleep(2500);
   const bkRows = await evalJs(`document.querySelectorAll('#backupCard [data-bk-dl]').length`);
   check('backup snapshot created and listed', bkRows >= 1, 'rows=' + bkRows);
+
+  phase = 'reminders';
+  await evalJs(`location.hash = '#/reminders'`);
+  await waitFor(`!!document.getElementById('rmText')`);
+  await sleep(800);
+  const rmText = await evalJs(`document.getElementById('rmText').textContent`);
+  check('reminders view renders daily digest text', rmText.length > 10 && /تذكير/.test(rmText), 'len=' + rmText.length);
+  const rmKpis = await evalJs(`document.querySelectorAll('.kpi').length`);
+  check('reminders view shows kpi cards', rmKpis === 4, 'kpis=' + rmKpis);
+  await evalJs(`document.getElementById('rmAdd').click()`);
+  await waitFor(`!!document.getElementById('rfTitle')`);
+  await sleep(400);
+  await evalJs(`(function(){document.getElementById('rfTitle').value='صيانة أسبوعية';document.getElementById('rfBody').value='فحص الطابعة الحرارية';document.getElementById('rfTime').value='09:45';})()`);
+  await evalJs(`document.getElementById('rfSave').click()`);
+  await sleep(1500);
+  const rmRows = await evalJs(`document.querySelectorAll('[data-rm-del]').length`);
+  check('custom reminder created from UI', rmRows === 1, 'rows=' + rmRows);
+  const rmList = await evalJs(`fetch('/api/reminders',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows)`, true);
+  check('custom reminder persisted with next run', Array.isArray(rmList) && rmList.length === 1 && rmList[0].title === 'صيانة أسبوعية' && !!rmList[0].next_run, JSON.stringify(rmList && rmList[0] && rmList[0].title));
+  await evalJs(`document.querySelector('[data-rm-del]').click()`);
+  await sleep(600);
+  const confirmText = await evalJs(`(function(){const ps=document.querySelectorAll('.modal-panel');return ps.length?ps[ps.length-1].innerText:'';})()`);
+  check('delete confirmation dialog shown', /حذف/.test(confirmText), confirmText.slice(0, 40).replace(/\n/g, ' '));
+  await evalJs(`(function(){const ps=document.querySelectorAll('.modal-backdrop');if(ps.length){const b=ps[ps.length-1].querySelector('[data-yes]');if(b)b.click();}})()`);
+  await sleep(1200);
+  const rmAfter = await evalJs(`fetch('/api/reminders',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows.length)`, true);
+  check('custom reminder deleted from UI', rmAfter === 0, 'rows=' + rmAfter);
 
   phase = 'offline';
   const external = [...new Set(requests)].filter((u) => !u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:') && !u.startsWith('about:'));

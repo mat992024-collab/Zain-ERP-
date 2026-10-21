@@ -14,6 +14,8 @@ const PERMISSIONS = [
   { key: 'settings.write', label: 'تعديل الإعدادات' },
   { key: 'admin.users', label: 'إدارة المستخدمين والصلاحيات' },
   { key: 'backup.manage', label: 'النسخ الاحتياطي والاستعادة' },
+  { key: 'reminders.view', label: 'عرض التذكيرات' },
+  { key: 'reminders.write', label: 'إدارة التذكيرات' },
 ];
 
 const ROLE_LABELS = { admin: 'مدير النظام', manager: 'مدير', accountant: 'محاسب', cashier: 'كاشير', warehouse: 'أمين مخزن' };

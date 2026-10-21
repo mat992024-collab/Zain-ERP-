@@ -313,6 +313,24 @@ CREATE TABLE IF NOT EXISTS vouchers (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS reminders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'custom',
+  repeat_type TEXT NOT NULL DEFAULT 'daily',
+  repeat_interval INTEGER NOT NULL DEFAULT 1,
+  time_of_day TEXT NOT NULL DEFAULT '09:00',
+  day_of_week INTEGER NOT NULL DEFAULT 0,
+  day_of_month INTEGER NOT NULL DEFAULT 1,
+  next_run TEXT,
+  last_run TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at);
@@ -371,6 +389,15 @@ const DEFAULT_SETTINGS = [
   ["auto_backup_time", "02:00", "backup"],
   ["auto_backup_keep", "7", "backup"],
   ["auto_backup_last", "", "backup"],
+  ["reminder_daily_time", "08:00", "reminders"],
+  ["reminder_expiry_days", "30", "reminders"],
+  ["reminder_expiry", "1", "reminders"],
+  ["reminder_low_stock", "1", "reminders"],
+  ["reminder_debts", "1", "reminders"],
+  ["reminder_sales_summary", "1", "reminders"],
+  ["reminder_signature", "", "reminders"],
+  ["reminder_last_digest", "", "reminders"],
+  ["reminder_last_digest_at", "", "reminders"],
 ];
 
 const INDUSTRY_PRESETS = {
