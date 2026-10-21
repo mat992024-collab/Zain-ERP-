@@ -55,12 +55,21 @@ function markDueRemindersRun() {
   }
 }
 
+let timer = null;
+
 function start() {
   const kick = setTimeout(() => { runAutoBackup(); runDailyDigest(); }, 8000);
   kick.unref();
-  const timer = setInterval(() => { runAutoBackup(); runDailyDigest(); }, 60 * 1000);
+  timer = setInterval(() => { runAutoBackup(); runDailyDigest(); }, 60 * 1000);
   timer.unref();
   return timer;
 }
 
-module.exports = { start, runAutoBackup, autoBackupDue, runDailyDigest, digestDue };
+function stop() {
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
+
+module.exports = { start, stop, runAutoBackup, autoBackupDue, runDailyDigest, digestDue };

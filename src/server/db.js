@@ -43,6 +43,7 @@ function migrate() {
     if (!cols(table).includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
   };
   ensure('invoices', 'installment_plan', 'installment_plan TEXT');
+  ensure('invoices', 'tax_inclusive', 'tax_inclusive INTEGER NOT NULL DEFAULT 0');
   ensure('settings', 'category', "category TEXT NOT NULL DEFAULT 'general'");
   ensure('products', 'units', "units TEXT NOT NULL DEFAULT '[]'");
   ensure('users', 'permissions', "permissions TEXT NOT NULL DEFAULT '[]'");
@@ -73,17 +74,17 @@ function bootstrap() {
     ).run('admin', 'مدير النظام', hash, salt, 'admin', JSON.stringify(['*']));
   }
 
-  const accCount = db.prepare('SELECT COUNT(*) AS c FROM accounts').get().c;
-  if (accCount === 0) {
-    const insert = db.prepare(
-      'INSERT INTO accounts (code, name, type, parent_id, is_system) VALUES (?, ?, ?, ?, ?)'
-    );
-    const byCode = {};
-    for (const [code, name, type, parentCode, isSystem] of SYSTEM_ACCOUNTS) {
-      const parentId = parentCode ? byCode[parentCode] : null;
-      const res = insert.run(code, name, type, parentId, isSystem);
-      byCode[code] = Number(res.lastInsertRowid);
-    }
+  const insert = db.prepare(
+    'INSERT INTO accounts (code, name, type, parent_id, is_system) VALUES (?, ?, ?, ?, ?)'
+  );
+  const existingCodes = new Set(db.prepare('SELECT code FROM accounts').all().map((r) => r.code));
+  const byCode = {};
+  for (const row of db.prepare('SELECT id, code FROM accounts').all()) byCode[row.code] = row.id;
+  for (const [code, name, type, parentCode, isSystem] of SYSTEM_ACCOUNTS) {
+    if (existingCodes.has(code)) continue;
+    const parentId = parentCode ? byCode[parentCode] || null : null;
+    const res = insert.run(code, name, type, parentId, isSystem);
+    byCode[code] = Number(res.lastInsertRowid);
   }
 
   const baseCode = getSetting('base_currency', 'IQD');

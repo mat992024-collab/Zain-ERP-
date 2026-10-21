@@ -95,6 +95,7 @@ export async function render(c) {
           <div class="bg-white rounded-xl p-3 space-y-1.5 text-sm">
             <div class="flex justify-between text-slate-500"><span>الإجمالي الفرعي</span><span id="sumSub">0</span></div>
             <div class="flex justify-between text-slate-500"><span>الخصم</span><span id="sumDisc">0</span></div>
+            <div class="flex justify-between text-slate-500"><span>الضريبة <span id="taxModeHint" class="text-xs"></span></span><span id="sumTax">0</span></div>
             <div class="flex justify-between font-black text-lg text-zain-700 pt-2 border-t border-dashed border-slate-200"><span>المجموع</span><span id="sumTotal">0</span></div>
           </div>
           <button id="payBtn" class="btn btn-success w-full !py-3 text-base"><i class="bi bi-cash-coin"></i> إتمام البيع (F9)</button>
@@ -124,7 +125,7 @@ export async function render(c) {
   });
   c.querySelector('#posCustomer').addEventListener('change', (e) => { state.cartMeta.customer_id = e.target.value; });
   c.querySelector('#posDiscount').addEventListener('input', (e) => { state.cartMeta.discount = Number(e.target.value) || 0; renderCart(); });
-  c.querySelector('#posTax').addEventListener('input', (e) => { state.cartMeta.tax = Number(e.target.value) || 0; renderCart(); });
+  c.querySelector('#posTax').addEventListener('input', (e) => { if (taxMode() !== 'manual') return; state.cartMeta.tax = Number(e.target.value) || 0; renderCart(); });
   c.querySelector('#clearCart').addEventListener('click', async () => {
     if (!state.cart.length) return;
     if (await confirmBox('هل تريد تفريغ السلة؟')) { state.cart = []; renderCart(); }
@@ -232,7 +233,7 @@ function renderGrid(term) {
   if (!grid) return;
   const t = (term || '').trim().toLowerCase();
   const list = (t
-    ? products.filter((p) => (p.name || '').toLowerCase().includes(t) || (p.barcode || '').includes(t) || (p.part_number || '').toLowerCase().includes(t))
+    ? products.filter((p) => (p.name || '').toLowerCase().includes(t) || String(p.barcode || '').toLowerCase().includes(t) || String(p.part_number || '').toLowerCase().includes(t))
     : products
   ).slice(0, 60);
   if (!list.length) {
@@ -284,7 +285,7 @@ export function addProduct(p) {
     }
     existing.qty += 1;
   } else {
-    state.cart.push({ product_id: p.id, name: p.name, unit: p.unit, qty: 1, unit_price: priceFor(p), cost_price: p.cost_price, discount: 0, stock });
+    state.cart.push({ product_id: p.id, name: p.name, unit: p.unit, qty: 1, unit_price: priceFor(p), cost_price: p.cost_price, discount: 0, tax_rate: Number(p.tax_rate) || 0, stock });
   }
   renderCart();
 }
@@ -325,11 +326,29 @@ function renderCart() {
   updateTotals();
 }
 
+function taxMode() {
+  return state.settings.tax_mode || 'manual';
+}
+
+function computedTax() {
+  const mode = taxMode();
+  if (mode === 'manual') return Number(state.cartMeta.tax || 0);
+  let total = 0;
+  for (const item of state.cart) {
+    const rate = Number(item.tax_rate) || 0;
+    if (rate <= 0) continue;
+    const net = item.qty * item.unit_price - item.discount;
+    total += mode === 'inclusive' ? net - net / (1 + rate / 100) : net * rate / 100;
+  }
+  return Math.round(total * 100) / 100;
+}
+
 function totals() {
   const sub = state.cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
   const itemsDisc = state.cart.reduce((s, i) => s + i.discount, 0);
-  const total = sub - itemsDisc - Number(state.cartMeta.discount || 0) + Number(state.cartMeta.tax || 0);
-  return { sub, itemsDisc, total };
+  const tax = computedTax();
+  const total = taxMode() === 'inclusive' ? sub - itemsDisc - Number(state.cartMeta.discount || 0) : sub - itemsDisc - Number(state.cartMeta.discount || 0) + tax;
+  return { sub, itemsDisc, tax, total };
 }
 
 function updateTotals() {
@@ -337,7 +356,19 @@ function updateTotals() {
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = money(v); };
   set('sumSub', t.sub);
   set('sumDisc', t.itemsDisc + Number(state.cartMeta.discount || 0));
+  set('sumTax', t.tax);
   set('sumTotal', t.total);
+  const taxInput = document.getElementById('posTax');
+  const hint = document.getElementById('taxModeHint');
+  if (hint) {
+    const mode = taxMode();
+    hint.textContent = mode === 'auto' ? '(تلقائي)' : mode === 'inclusive' ? '(ضمن السعر)' : '(يدوي)';
+  }
+  if (taxInput && taxMode() !== 'manual') {
+    taxInput.value = String(t.tax);
+    taxInput.readOnly = true;
+    taxInput.classList.add('bg-slate-100');
+  }
 }
 
 function loadSuspended() {
@@ -451,7 +482,7 @@ async function repeatLastSale() {
       const qty = Math.max(1, Number(it.qty) || 1);
       const existing = state.cart.find((i) => i.product_id === p.id);
       if (existing) existing.qty += qty;
-      else state.cart.push({ product_id: p.id, name: p.name, unit: p.unit, qty, unit_price: Number(it.unit_price) || priceFor(p), cost_price: p.cost_price, discount: Number(it.discount) || 0, stock: p.quantity });
+      else state.cart.push({ product_id: p.id, name: p.name, unit: p.unit, qty, unit_price: Number(it.unit_price) || priceFor(p), cost_price: p.cost_price, discount: Number(it.discount) || 0, tax_rate: Number(p.tax_rate) || 0, stock: p.quantity });
       added += 1;
     }
     if (!added) { toast(missing ? 'أصناف الفاتورة السابقة لم تعد متوفرة' : 'تعذر تحميل الفاتورة', 'error'); return; }
@@ -580,7 +611,7 @@ function submitSale(method, paid, force, currencyCode, paidOriginal) {
     paid_original: paidOriginal === undefined ? null : paidOriginal,
     currency: currencyCode || null,
     discount: Number(state.cartMeta.discount) || 0,
-    tax: Number(state.cartMeta.tax) || 0,
+    tax: taxMode() === 'manual' ? Number(state.cartMeta.tax) || 0 : null,
     shift_id: state.shift ? state.shift.id : null,
     ...(force ? { force_credit_limit: true } : {}),
   });

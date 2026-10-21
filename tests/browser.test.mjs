@@ -470,7 +470,8 @@ async function main() {
 
   phase = 'backup';
   await evalJs(`location.hash = '#/admin'`);
-  await sleep(2200);
+  await waitFor(`!!document.getElementById('backupCard')`);
+  await sleep(600);
   const bkCard = await evalJs(`!!document.getElementById('backupCard')`);
   check('backup card rendered in admin', bkCard === true);
   await evalJs(`document.getElementById('bkCreate').click()`);
@@ -537,6 +538,42 @@ async function main() {
   check('account ledger dialog opens', /دفتر الأستاذ/.test(ledgerText), ledgerText.slice(0, 50).replace(/\n/g, ' '));
   await evalJs(`(function(){const ps=document.querySelectorAll('.modal-backdrop');if(ps.length){const b=ps[ps.length-1].querySelector('[data-close]');if(b)b.click();}})()`);
   await sleep(500);
+
+  phase = 'tax-report';
+  await evalJs(`fetch('/api/products/${productId}',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({tax_rate:10})}).then(r=>r.json())`, true);
+  await evalJs(`fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({tax_mode:'auto'})}).then(r=>r.json())`, true);
+  await nav(BASE);
+  await waitFor(`!!document.getElementById('main') && !document.getElementById('main').classList.contains('hidden')`);
+  await sleep(1000);
+  await evalJs(`location.hash = '#/pos'`);
+  await waitFor(`!!document.getElementById('posSearch')`);
+  await sleep(1200);
+  await evalJs(`(function(){const s=document.getElementById('posSearch');s.value='UITEST1';s.dispatchEvent(new Event('input'));})()`);
+  await sleep(900);
+  await evalJs(`document.querySelector('#productGrid [data-id]').click()`);
+  await sleep(600);
+  const taxField = await evalJs(`(function(){const el=document.getElementById('posTax');return el?{ro:el.readOnly,v:el.value}:null;})()`);
+  check('pos tax field readonly in auto mode', taxField && taxField.ro === true, JSON.stringify(taxField));
+  const taxHint = await evalJs(`(document.getElementById('taxModeHint')||{}).textContent||''`);
+  check('pos shows tax mode hint', /تلقائي/.test(taxHint), taxHint);
+  const taxValue = await evalJs(`(document.getElementById('sumTax')||{}).textContent||''`);
+  check('pos shows computed tax row', taxValue.length > 0 && taxValue !== '0', 'tax=' + taxValue);
+  await evalJs(`document.getElementById('clearCart').click()`);
+  await sleep(500);
+  await evalJs(`(function(){const b=document.querySelector('.modal-backdrop [data-yes]');if(b)b.click();})()`);
+  await sleep(400);
+  await evalJs(`fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({tax_mode:'manual'})}).then(r=>r.json())`, true);
+  await evalJs(`location.hash = '#/reports'`);
+  await sleep(1500);
+  await evalJs(`document.querySelector('[data-rtab="tax"]').click()`);
+  await waitFor(`!!document.getElementById('taxPrint')`);
+  await sleep(800);
+  const taxKpis = await evalJs(`document.querySelectorAll('#repPane .kpi').length`);
+  check('tax report shows kpis', taxKpis === 4, 'kpis=' + taxKpis);
+  const taxPrintBtn = await evalJs(`!!document.getElementById('taxPrint')`);
+  check('tax report has print button', taxPrintBtn === true);
+  const taxApi = await evalJs(`fetch('/api/reports/tax',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>({o:d.output_tax,n:d.net_payable,rows:d.rows.length}))`, true);
+  check('tax report api returns totals', taxApi && typeof taxApi.o === 'number' && taxApi.rows >= 0, JSON.stringify(taxApi));
 
   phase = 'offline';
   const external = [...new Set(requests)].filter((u) => !u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:') && !u.startsWith('about:'));

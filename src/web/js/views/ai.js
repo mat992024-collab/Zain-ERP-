@@ -71,6 +71,7 @@ export async function renderReports(c) {
     <div class="flex gap-2 mb-3">
       <button data-rtab="sales" class="btn btn-primary"><i class="bi bi-graph-up"></i> المبيعات والأرباح</button>
       <button data-rtab="inventory" class="btn btn-ghost"><i class="bi bi-box-seam"></i> تقرير المخزون</button>
+      <button data-rtab="tax" class="btn btn-ghost"><i class="bi bi-percent"></i> تقرير الضريبة</button>
     </div>
     <div id="repPane"></div>`;
   const pane = () => c.querySelector('#repPane');
@@ -79,7 +80,7 @@ export async function renderReports(c) {
     b.className = 'btn btn-primary';
     open(b.dataset.rtab);
   }));
-  const open = (key) => (key === 'inventory' ? inventory(pane()) : sales(pane()));
+  const open = (key) => (key === 'inventory' ? inventory(pane()) : key === 'tax' ? taxReport(pane()) : sales(pane()));
   sales(pane());
 }
 
@@ -186,4 +187,39 @@ async function inventory(p) {
     </div>`;
 
   p.querySelector('#invPrint').addEventListener('click', () => openPrint('/api/print/inventory'));
+}
+
+async function taxReport(p) {
+  const data = await api('GET', '/api/reports/tax');
+  const typeLabels = { sale: 'بيع', return_sale: 'مرتجع بيع', purchase: 'شراء', return_purchase: 'مرتجع شراء' };
+  const rows = data.rows.map((r) => `
+    <tr class="tr">
+      <td class="td font-mono text-xs">${esc(r.invoice_no)}</td>
+      <td class="td text-xs">${esc(r.created_at)}</td>
+      <td class="td"><span class="badge ${r.type === 'sale' ? 'badge-ok' : r.type.startsWith('return') ? 'badge-danger' : 'badge-info'}">${esc(typeLabels[r.type] || r.type)}</span></td>
+      <td class="td">${money(r.subtotal, '')}</td>
+      <td class="td font-bold text-zain-700">${money(r.tax, '')}${Number(r.tax_inclusive) ? ' <span class="text-[10px] text-slate-400">(ضمن السعر)</span>' : ''}</td>
+      <td class="td">${money(r.total, '')}</td>
+    </tr>`).join('');
+
+  p.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-arrow-up-circle"></i></div><div><div class="kpi-value">${money(data.output_tax)}</div><div class="kpi-label">ضريبة المخرجات</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-amber-100 text-amber-700"><i class="bi bi-arrow-down-circle"></i></div><div><div class="kpi-value">${money(data.input_tax)}</div><div class="kpi-label">ضريبة المشتريات</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-bank"></i></div><div><div class="kpi-value">${money(data.net_payable)}</div><div class="kpi-label">صافي المستحق للهيئة</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-indigo-100 text-indigo-700"><i class="bi bi-receipt"></i></div><div><div class="kpi-value">${num(data.rows.length)}</div><div class="kpi-label">فواتير خاضعة للضريبة</div></div></div>
+    </div>
+
+    <div class="card">
+      <div class="p-4 border-b border-slate-100 font-black flex items-center justify-between">
+        <span><i class="bi bi-percent text-zain-600"></i> تفاصيل الضريبة المحصّلة</span>
+        <button id="taxPrint" class="btn btn-primary btn-sm"><i class="bi bi-printer"></i> طباعة التقرير</button>
+      </div>
+      <div class="overflow-auto max-h-[56vh]"><table class="w-full">
+        <thead><tr><th class="th">رقم الفاتورة</th><th class="th">التاريخ</th><th class="th">النوع</th><th class="th">قبل الضريبة</th><th class="th">الضريبة</th><th class="th">الإجمالي</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="td text-center text-slate-400 py-8">لا توجد فواتير خاضعة للضريبة</td></tr>`}</tbody>
+      </table></div>
+    </div>`;
+
+  p.querySelector('#taxPrint').addEventListener('click', () => openPrint('/api/print/tax'));
 }

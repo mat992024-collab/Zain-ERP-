@@ -63,6 +63,22 @@ function profitOf(invoice) {
   return 0;
 }
 
+function computeTax(items, mode) {
+  if (mode === 'manual') return 0;
+  let total = 0;
+  for (const item of items) {
+    const rate = Number(item.tax_rate) || 0;
+    if (rate <= 0) continue;
+    const net = round2(item.qty * item.unit_price - item.discount);
+    if (mode === 'inclusive') {
+      total += round2(net - net / (1 + rate / 100));
+    } else {
+      total += round2(net * rate / 100);
+    }
+  }
+  return round2(total);
+}
+
 function normalizeItems(rawItems) {
   if (!Array.isArray(rawItems) || !rawItems.length) throw new HttpError(400, 'الفاتورة لا تحتوي على أصناف');
   return rawItems.map((item) => {
@@ -72,6 +88,7 @@ function normalizeItems(rawItems) {
     const unitPrice = Number(item.unit_price ?? item.price ?? (product ? product.sale_price : 0)) || 0;
     const discount = Number(item.discount) || 0;
     const costPrice = Number(item.cost_price ?? (product ? product.cost_price : 0)) || 0;
+    const taxRate = Number(item.tax_rate ?? (product ? product.tax_rate : 0)) || 0;
     const total = round2(qty * unitPrice - discount);
     return {
       product_id: product ? product.id : null,
@@ -82,17 +99,18 @@ function normalizeItems(rawItems) {
       cost_price: costPrice,
       discount,
       total,
+      tax_rate: taxRate,
       product,
     };
   });
 }
 
-function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId, items, discount, tax, paid, paymentMethod, notes, installmentPlan, currencyCode, exchangeRate, totalOriginal, paidOriginal }) {
+function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId, items, discount, tax, taxInclusive, paid, paymentMethod, notes, installmentPlan, currencyCode, exchangeRate, totalOriginal, paidOriginal }) {
   const subtotal = round2(items.reduce((s, i) => s + i.qty * i.unit_price, 0));
   const itemsDiscount = round2(items.reduce((s, i) => s + i.discount, 0));
   const invoiceDiscount = round2(discount || 0);
   const taxAmount = round2(tax || 0);
-  const total = round2(subtotal - itemsDiscount - invoiceDiscount + taxAmount);
+  const total = round2(subtotal - itemsDiscount - invoiceDiscount + (taxInclusive ? 0 : taxAmount));
   const paidAmount = paid === undefined || paid === null ? (paymentMethod === 'credit' ? 0 : total) : round2(paid);
   const due = round2(total - paidAmount);
 
@@ -105,11 +123,11 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
   db.tx(() => {
     const res = db.run(
       `INSERT INTO invoices (invoice_no, type, pos_mode, customer_id, supplier_id, user_id, shift_id,
-        subtotal, discount, tax, total, paid, due, payment_method, status, notes, installment_plan,
+        subtotal, discount, tax, tax_inclusive, total, paid, due, payment_method, status, notes, installment_plan,
         currency, exchange_rate, total_original, paid_original)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)`,
       [invoiceNo, type, posMode, customerId || null, supplierId || null, userId || null, shiftId || null,
-        subtotal, round2(itemsDiscount + invoiceDiscount), taxAmount, total, paidAmount, due,
+        subtotal, round2(itemsDiscount + invoiceDiscount), taxAmount, taxInclusive ? 1 : 0, total, paidAmount, due,
         paymentMethod, notes || null, installmentPlan ? JSON.stringify(installmentPlan) : null,
         currencyCode || null, exchangeRate || 1, totalOriginal === undefined ? null : totalOriginal,
         paidOriginal === undefined ? null : paidOriginal]
@@ -156,7 +174,8 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
           ledger.addAccountEntry({ code: '1100', direction: 'debit', amount: paidAmount, refTable: 'invoices', refId: invoiceId, description: `فاتورة ${invoiceNo}` });
         }
         if (due > 0) ledger.addAccountEntry({ code: '1300', direction: 'debit', amount: due, refTable: 'invoices', refId: invoiceId, description: `آجل ${invoiceNo}` });
-        ledger.addAccountEntry({ code: '4100', direction: 'credit', amount: total, refTable: 'invoices', refId: invoiceId, description: `إيراد ${invoiceNo}` });
+        ledger.addAccountEntry({ code: '4100', direction: 'credit', amount: round2(total - taxAmount), refTable: 'invoices', refId: invoiceId, description: `إيراد ${invoiceNo}` });
+        if (taxAmount > 0) ledger.addAccountEntry({ code: '2300', direction: 'credit', amount: taxAmount, refTable: 'invoices', refId: invoiceId, description: `ضريبة مخرجات ${invoiceNo}` });
         if (costTotal > 0) {
           ledger.addAccountEntry({ code: '5100', direction: 'debit', amount: costTotal, refTable: 'invoices', refId: invoiceId, description: `تكلفة ${invoiceNo}` });
           ledger.addAccountEntry({ code: '1200', direction: 'credit', amount: costTotal, refTable: 'invoices', refId: invoiceId, description: `صرف مخزون ${invoiceNo}` });
@@ -172,13 +191,15 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
           ledger.addAccountEntry({ code: '1100', direction: 'credit', amount: paidAmount, refTable: 'invoices', refId: invoiceId, description: `صرف نقدي ${invoiceNo}` });
         }
         if (due > 0) ledger.addAccountEntry({ code: '2100', direction: 'credit', amount: due, refTable: 'invoices', refId: invoiceId, description: `آجل مورد ${invoiceNo}` });
-        ledger.addAccountEntry({ code: '1200', direction: 'debit', amount: total, refTable: 'invoices', refId: invoiceId, description: `إضافة مخزون ${invoiceNo}` });
+        ledger.addAccountEntry({ code: '1200', direction: 'debit', amount: round2(total - taxAmount), refTable: 'invoices', refId: invoiceId, description: `إضافة مخزون ${invoiceNo}` });
+        if (taxAmount > 0) ledger.addAccountEntry({ code: '2300', direction: 'debit', amount: taxAmount, refTable: 'invoices', refId: invoiceId, description: `ضريبة مشتريات ${invoiceNo}` });
       }
     }
 
     if (isReturnSale) {
       if (customerId && due > 0) db.run('UPDATE customers SET balance = balance - ? WHERE id = ?', [due, customerId]);
-      ledger.addAccountEntry({ code: '4100', direction: 'debit', amount: total, refTable: 'invoices', refId: invoiceId, description: `مرتجع ${invoiceNo}` });
+      ledger.addAccountEntry({ code: '4100', direction: 'debit', amount: round2(total - taxAmount), refTable: 'invoices', refId: invoiceId, description: `مرتجع ${invoiceNo}` });
+      if (taxAmount > 0) ledger.addAccountEntry({ code: '2300', direction: 'debit', amount: taxAmount, refTable: 'invoices', refId: invoiceId, description: `ضريبة مرتجع ${invoiceNo}` });
       if (paidAmount > 0) {
         ledger.addTreasury({
           direction: 'out', amount: paidAmount, source: 'return_sale', refTable: 'invoices',
@@ -204,7 +225,8 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
       if (total - paidAmount > 0) {
         ledger.addAccountEntry({ code: '2100', direction: 'debit', amount: round2(total - paidAmount), refTable: 'invoices', refId: invoiceId, description: `تخفيض مستحق المورد ${invoiceNo}` });
       }
-      ledger.addAccountEntry({ code: '1200', direction: 'credit', amount: total, refTable: 'invoices', refId: invoiceId, description: `خروج مخزون ${invoiceNo}` });
+      ledger.addAccountEntry({ code: '1200', direction: 'credit', amount: round2(total - taxAmount), refTable: 'invoices', refId: invoiceId, description: `خروج مخزون ${invoiceNo}` });
+      if (taxAmount > 0) ledger.addAccountEntry({ code: '2300', direction: 'credit', amount: taxAmount, refTable: 'invoices', refId: invoiceId, description: `ضريبة مرتجع شراء ${invoiceNo}` });
     }
 
     if (type === 'sale' && installmentPlan && due > 0 && customerId) {
@@ -334,11 +356,17 @@ module.exports = {
       }
       const items = normalizeItems(body.items);
       const type = ['sale', 'return_sale', 'purchase', 'return_purchase'].includes(body.type) ? body.type : 'sale';
+      const taxMode = db.getSetting('tax_mode', 'manual');
+      const taxManual = body.tax !== undefined && body.tax !== null;
+      const taxValue = taxManual
+        ? Number(body.tax) || 0
+        : (taxMode === 'manual' ? 0 : computeTax(items, taxMode));
+      const taxInclusive = !taxManual && taxMode === 'inclusive';
       const total = round2(
         items.reduce((s, i) => s + i.qty * i.unit_price, 0)
         - items.reduce((s, i) => s + i.discount, 0)
         - (Number(body.discount) || 0)
-        + (Number(body.tax) || 0)
+        + (taxInclusive ? 0 : taxValue)
       );
       const paidValue = body.paid === undefined || body.paid === null
         ? (body.payment_method === 'credit' ? 0 : total)
@@ -381,7 +409,8 @@ module.exports = {
         shiftId: body.shift_id || null,
         items,
         discount: body.discount,
-        tax: body.tax,
+        tax: taxValue,
+        taxInclusive,
         paid: paidBase,
         paymentMethod: body.payment_method || 'cash',
         notes: body.notes,
@@ -404,6 +433,12 @@ module.exports = {
       if (!ctx.can('purchases.write') && !ctx.can('inventory.write')) throw new HttpError(403, 'لا تملك صلاحية الشراء');
       const body = ctx.body || {};
       const items = normalizeItems(body.items);
+      const purchaseTaxMode = db.getSetting('tax_mode', 'manual');
+      const purchaseTaxManual = body.tax !== undefined && body.tax !== null;
+      const taxValue = purchaseTaxManual
+        ? Number(body.tax) || 0
+        : (purchaseTaxMode === 'manual' ? 0 : computeTax(items, purchaseTaxMode));
+      const taxInclusive = !purchaseTaxManual && purchaseTaxMode === 'inclusive';
       const result = persistInvoice({
         type: 'purchase',
         posMode: 'purchase',
@@ -412,7 +447,8 @@ module.exports = {
         shiftId: body.shift_id || null,
         items,
         discount: body.discount,
-        tax: body.tax,
+        tax: taxValue,
+        taxInclusive,
         paid: body.paid,
         paymentMethod: body.payment_method || 'cash',
         notes: body.notes,
@@ -429,10 +465,13 @@ module.exports = {
       const originalItems = db.all('SELECT * FROM invoice_items WHERE invoice_id = ?', [original.id]);
       const requested = Array.isArray(ctx.body.items) ? ctx.body.items : null;
       const items = normalizeItems(mapReturnItems(originalItems, requested, 'فاتورة الشراء الأصلية'));
-      const itemsTotal = round2(items.reduce((s, i) => s + i.qty * i.unit_price, 0));
+      const itemsTotal = round2(items.reduce((s, i) => s + i.total, 0));
       const originalSubtotal = Number(original.subtotal) || 0;
       const discountShare = originalSubtotal > 0
         ? round2((Number(original.discount) || 0) * (itemsTotal / originalSubtotal))
+        : 0;
+      const taxShare = originalSubtotal > 0
+        ? round2((Number(original.tax) || 0) * (itemsTotal / originalSubtotal))
         : 0;
       const refund = Math.min(Math.max(Number(ctx.body.paid) || 0, 0), round2(itemsTotal - discountShare));
       const result = persistInvoice({
@@ -443,7 +482,8 @@ module.exports = {
         shiftId: ctx.body.shift_id || null,
         items,
         discount: discountShare,
-        tax: 0,
+        tax: taxShare,
+        taxInclusive: Number(original.tax_inclusive) === 1,
         paid: refund,
         paymentMethod: refund > 0 ? 'cash' : 'credit',
         notes: `مرتجع من فاتورة الشراء ${original.invoice_no}`,
@@ -460,6 +500,11 @@ module.exports = {
       const originalItems = db.all('SELECT * FROM invoice_items WHERE invoice_id = ?', [original.id]);
       const requested = Array.isArray(ctx.body.items) ? ctx.body.items : null;
       const items = normalizeItems(mapReturnItems(originalItems, requested, 'الفاتورة الأصلية'));
+      const itemsTotal = round2(items.reduce((s, i) => s + i.total, 0));
+      const originalSubtotal = Number(original.subtotal) || 0;
+      const taxShare = originalSubtotal > 0
+        ? round2((Number(original.tax) || 0) * (itemsTotal / originalSubtotal))
+        : 0;
       const result = persistInvoice({
         type: 'return_sale',
         posMode: original.pos_mode,
@@ -468,8 +513,9 @@ module.exports = {
         shiftId: ctx.body.shift_id || null,
         items,
         discount: 0,
-        tax: 0,
-        paid: ctx.body.refund === false ? 0 : items.reduce((s, i) => s + i.total, 0),
+        tax: taxShare,
+        taxInclusive: Number(original.tax_inclusive) === 1,
+        paid: ctx.body.refund === false ? 0 : itemsTotal + (Number(original.tax_inclusive) === 1 ? 0 : taxShare),
         paymentMethod: original.payment_method,
         notes: `مرتجع من الفاتورة ${original.invoice_no}`,
       });

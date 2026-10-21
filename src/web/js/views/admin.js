@@ -367,6 +367,11 @@ export async function openSettings() {
           <option value="off" ${s.credit_limit_mode === 'off' ? 'selected' : ''}>بدون تطبيق</option>
         </select>`)}
         ${field('ضريبة افتراضية %', `<input id="set_default_tax_rate" type="number" class="field" value="${esc(s.default_tax_rate)}" />`)}
+        ${field('طريقة احتساب الضريبة', `<select id="set_tax_mode" class="field">
+          <option value="manual" ${s.tax_mode === 'manual' ? 'selected' : ''}>يدوي (إدخال الكاشير)</option>
+          <option value="auto" ${s.tax_mode === 'auto' ? 'selected' : ''}>تلقائي (نسبة ضريبة كل صنف مضافة)</option>
+          <option value="inclusive" ${s.tax_mode === 'inclusive' ? 'selected' : ''}>الأسعار شاملة الضريبة (تُستخرج من المجموع)</option>
+        </select>`)}
         <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_negative_stock" class="accent-zain-600" ${s.negative_stock === '1' ? 'checked' : ''} /> السماح بالبيع بالسالب</label>
         <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_shift_required" class="accent-zain-600" ${s.shift_required === '1' ? 'checked' : ''} /> إلزام فتح وردية للبيع</label>
         <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_ai_enabled" class="accent-zain-600" ${s.ai_enabled === '1' ? 'checked' : ''} /> تشغيل محرك الذكاء الاصطناعي</label>
@@ -446,6 +451,7 @@ export async function openSettings() {
           default_pos_mode: wrap.querySelector('#set_default_pos_mode').value,
           credit_limit_mode: wrap.querySelector('#set_credit_limit_mode').value,
           default_tax_rate: wrap.querySelector('#set_default_tax_rate').value,
+          tax_mode: wrap.querySelector('#set_tax_mode').value,
           negative_stock: wrap.querySelector('#set_negative_stock').checked ? 1 : 0,
           shift_required: wrap.querySelector('#set_shift_required').checked ? 1 : 0,
           ai_enabled: wrap.querySelector('#set_ai_enabled').checked ? 1 : 0,

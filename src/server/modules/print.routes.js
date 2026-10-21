@@ -135,7 +135,7 @@ module.exports = {
         <table>
           <tr><td>الإجمالي الفرعي</td><td class="col-price">${money(invCur.convert(invoice.subtotal), cur)}</td></tr>
           ${Number(invoice.discount) ? `<tr><td>الخصم</td><td class="col-price">-${money(invCur.convert(invoice.discount), cur)}</td></tr>` : ''}
-          ${Number(invoice.tax) ? `<tr><td>الضريبة</td><td class="col-price">${money(invCur.convert(invoice.tax), cur)}</td></tr>` : ''}
+          ${Number(invoice.tax) ? `<tr><td>الضريبة${Number(invoice.tax_inclusive) ? ' (ضمن السعر)' : ''}</td><td class="col-price">${money(invCur.convert(invoice.tax), cur)}</td></tr>` : ''}
           <tr class="total-row"><td>المجموع</td><td class="col-price">${money(invCur.convert(invoice.total), cur)}</td></tr>
           <tr><td>مدفوع (${esc(invoice.payment_method)})</td><td class="col-price">${money(invCur.convert(invoice.paid), cur)}</td></tr>
           ${Number(invoice.due) ? `<tr><td>متبقي</td><td class="col-price">${money(invCur.convert(invoice.due), cur)}</td></tr>` : ''}
@@ -195,7 +195,7 @@ module.exports = {
         <div class="totals">
           <div><span>الإجمالي الفرعي</span><span>${money(invCur.convert(invoice.subtotal), cur)}</span></div>
           <div><span>الخصم</span><span>${money(invCur.convert(invoice.discount), cur)}</span></div>
-          <div><span>الضريبة</span><span>${money(invCur.convert(invoice.tax), cur)}</span></div>
+          <div><span>الضريبة${Number(invoice.tax_inclusive) ? ' (ضمن السعر)' : ''}</span><span>${money(invCur.convert(invoice.tax), cur)}</span></div>
           <div class="grand"><span>المجموع</span><span>${money(invCur.convert(invoice.total), cur)}</span></div>
           <div><span>مدفوع</span><span>${money(invCur.convert(invoice.paid), cur)}</span></div>
           <div><span>المتبقي</span><span>${money(invCur.convert(invoice.due), cur)}</span></div>
@@ -555,6 +555,53 @@ module.exports = {
           <div style="text-align:left">أمين المخزن: ....................</div>
         </footer>`;
       sendText(ctx.res, 200, htmlDoc('تقرير المخزون', A4_CSS + tpl.extraCss(settings, true), body), 'text/html; charset=utf-8');
+    });
+
+    router.get('/api/print/tax', (ctx) => {
+      const data = accounting.buildTaxReport(ctx.query);
+      const settings = db.getSettings();
+      const cur = settings.currency_symbol || 'د.ع';
+      const typeLabels = { sale: 'بيع', return_sale: 'مرتجع بيع', purchase: 'شراء', return_purchase: 'مرتجع شراء' };
+      const rows = data.rows.map((r) => `
+        <tr>
+          <td style="font-family:monospace;font-size:11px">${esc(r.invoice_no)}</td>
+          <td style="font-size:11px">${esc(r.created_at)}</td>
+          <td>${esc(typeLabels[r.type] || r.type)}</td>
+          <td style="text-align:left">${money(r.subtotal, '')}</td>
+          <td style="text-align:left;font-weight:bold">${money(r.tax, '')}${Number(r.tax_inclusive) ? ' (ضمن السعر)' : ''}</td>
+          <td style="text-align:left">${money(r.total, '')}</td>
+        </tr>`).join('');
+      const body = `
+        <header>
+          <div>
+            ${tpl.logoTag(settings, 'print-logo logo-inline')}
+            <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
+            <div style="font-size:13px;color:#475569;margin-top:6px">
+              ${esc(settings.company_address || '')}<br/>
+              ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
+              ${tpl.taxIdLine(settings)}
+            </div>
+          </div>
+          <div class="meta">
+            <span class="badge">تقرير الضريبة</span><br/><br/>
+            عدد الفواتير: ${data.rows.length}
+          </div>
+        </header>
+        <div class="cards">
+          <div class="box"><div class="lbl">ضريبة المخرجات</div><div class="val" style="color:#059669">${money(data.output_tax, cur)}</div></div>
+          <div class="box"><div class="lbl">ضريبة المشتريات</div><div class="val" style="color:#b45309">${money(data.input_tax, cur)}</div></div>
+          <div class="box"><div class="lbl">صافي المستحق</div><div class="val" style="color:#4338ca">${money(data.net_payable, cur)}</div></div>
+        </div>
+        <h2 style="font-size:16px;margin:22px 0 8px">تفاصيل الفواتير الخاضعة للضريبة</h2>
+        <table class="items">
+          <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>النوع</th><th style="text-align:left">قبل الضريبة</th><th style="text-align:left">الضريبة</th><th style="text-align:left">الإجمالي</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6" style="text-align:center;padding:16px">لا توجد فواتير خاضعة للضريبة</td></tr>'}</tbody>
+        </table>
+        <footer>
+          <div>${esc(settings.receipt_footer || '')}${tpl.footerExtra(settings)}</div>
+          <div style="text-align:left">المحاسب: ....................</div>
+        </footer>`;
+      sendText(ctx.res, 200, htmlDoc('تقرير الضريبة', A4_CSS + tpl.extraCss(settings, true), body), 'text/html; charset=utf-8');
     });
 
     router.get('/api/print/account/:id', (ctx) => {

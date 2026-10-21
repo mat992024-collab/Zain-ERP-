@@ -109,6 +109,7 @@ function buildIncomeStatement(query = {}) {
 module.exports = {
   buildIncomeStatement,
   buildInventoryReport,
+  buildTaxReport,
   register(router) {
     router.get('/api/accounts', (ctx) => {
       const rows = db.all('SELECT * FROM accounts ORDER BY code');
@@ -386,8 +387,46 @@ module.exports = {
     router.get('/api/reports/inventory', (ctx) => {
       sendJson(ctx.res, 200, buildInventoryReport(ctx.query));
     });
+
+    router.get('/api/reports/tax', (ctx) => {
+      sendJson(ctx.res, 200, buildTaxReport(ctx.query));
+    });
   },
 };
+
+function buildTaxReport(query = {}) {
+  const where = [];
+  const params = [];
+  if (query.from) { where.push('date(created_at) >= date(?)'); params.push(query.from); }
+  if (query.to) { where.push('date(created_at) <= date(?)'); params.push(query.to); }
+  const range = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const rows = db.all(
+    `SELECT id, invoice_no, type, created_at, subtotal, discount, tax, tax_inclusive, total, payment_method
+     FROM invoices ${range ? range + ' AND' : 'WHERE'} tax > 0
+     AND type IN ('sale','return_sale','purchase','return_purchase')
+     ORDER BY created_at DESC, id DESC`,
+    params
+  );
+  const sum = (list, key) => Math.round(list.reduce((s, r) => s + (Number(r[key]) || 0), 0) * 100) / 100;
+  const sales = rows.filter((r) => r.type === 'sale');
+  const salesReturns = rows.filter((r) => r.type === 'return_sale');
+  const purchases = rows.filter((r) => r.type === 'purchase');
+  const purchaseReturns = rows.filter((r) => r.type === 'return_purchase');
+  const outputTax = Math.round((sum(sales, 'tax') - sum(salesReturns, 'tax')) * 100) / 100;
+  const inputTax = Math.round((sum(purchases, 'tax') - sum(purchaseReturns, 'tax')) * 100) / 100;
+  return {
+    rows,
+    output_tax: outputTax,
+    input_tax: inputTax,
+    net_payable: Math.round((outputTax - inputTax) * 100) / 100,
+    sales_tax: sum(sales, 'tax'),
+    returns_tax: sum(salesReturns, 'tax'),
+    purchases_tax: sum(purchases, 'tax'),
+    purchase_returns_tax: sum(purchaseReturns, 'tax'),
+    sales_net: Math.round((sum(sales, 'total') - sum(salesReturns, 'total')) * 100) / 100,
+    purchases_net: Math.round((sum(purchases, 'total') - sum(purchaseReturns, 'total')) * 100) / 100,
+  };
+}
 
 function buildInventoryReport(query = {}) {
   const where = ['is_active = 1'];

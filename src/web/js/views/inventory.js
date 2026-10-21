@@ -1,6 +1,6 @@
 import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, debounce, formToObject, downloadFile } from '../core.js';
 
-const BULK_FIELDS = ['name', 'barcode', 'part_number', 'author', 'category', 'brand', 'unit', 'cost_price', 'sale_price', 'wholesale_price', 'quantity', 'reorder_level', 'expiry_date', 'supplier_id', 'track_expiry', 'is_active', 'description'];
+const BULK_FIELDS = ['name', 'barcode', 'part_number', 'author', 'category', 'brand', 'unit', 'cost_price', 'sale_price', 'wholesale_price', 'quantity', 'reorder_level', 'tax_rate', 'expiry_date', 'supplier_id', 'track_expiry', 'is_active', 'description'];
 
 export async function renderProducts(c) {
   await listView(c, { mode: 'products' });
@@ -164,6 +164,7 @@ function productForm(product, { categories, suppliers, onSave }) {
         ${field('سعر الجملة', `<input name="wholesale_price" type="number" value="${p.wholesale_price || 0}" class="field" />`)}
         ${field('الكمية', `<input name="quantity" type="number" value="${p.quantity || 0}" class="field" />`)}
         ${field('حد إعادة الطلب', `<input name="reorder_level" type="number" value="${p.reorder_level ?? 5}" class="field" />`)}
+        ${field('نسبة الضريبة %', `<input name="tax_rate" type="number" step="0.01" value="${p.tax_rate ?? 0}" class="field" />`)}
         ${field('المورد', `<select name="supplier_id" class="field"><option value="">—</option>${(suppliers || []).map((s) => `<option value="${s.id}" ${p.supplier_id === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>`)}
         ${field('تاريخ الصلاحية', `<input name="expiry_date" type="date" value="${p.expiry_date || ''}" class="field" />`)}
         <div class="flex items-center gap-4 pt-6">

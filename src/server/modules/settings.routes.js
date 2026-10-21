@@ -37,6 +37,9 @@ module.exports = {
           if (key === 'ai_enabled' || key === 'low_stock_alert') {
             db.setSetting(key, value ? '1' : '0', 'ai');
           } else {
+            if (key === 'tax_mode' && !['manual', 'auto', 'inclusive'].includes(String(value))) {
+              throw new HttpError(400, 'طريقة احتساب الضريبة غير صحيحة');
+            }
             if (typeof value === 'string' && value.length > 600000) throw new HttpError(400, `قيمة الإعداد ${key} كبيرة جداً`);
             const existing = db.get('SELECT category FROM settings WHERE key = ?', [key]);
             db.setSetting(key, value, existing ? existing.category : 'general');
