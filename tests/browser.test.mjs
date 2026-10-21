@@ -505,6 +505,39 @@ async function main() {
   const rmAfter = await evalJs(`fetch('/api/reminders',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows.length)`, true);
   check('custom reminder deleted from UI', rmAfter === 0, 'rows=' + rmAfter);
 
+  phase = 'inventory-report';
+  await nav(BASE);
+  await waitFor(`document.querySelectorAll('#nav [data-nav]').length > 0`);
+  await sleep(1200);
+  await evalJs(`location.hash = '#/reports'`);
+  await waitFor(`!!document.querySelector('[data-rtab="inventory"]')`);
+  await sleep(1200);
+  await evalJs(`document.querySelector('[data-rtab="inventory"]').click()`);
+  await waitFor(`!!document.getElementById('invPrint')`);
+  await sleep(900);
+  const invKpis = await evalJs(`document.querySelectorAll('.kpi').length`);
+  check('inventory report shows kpis', invKpis === 4, 'kpis=' + invKpis);
+  const invText = await evalJs(`document.getElementById('repPane').innerText`);
+  check('inventory report lists products', /لابتوب|صنف/.test(invText), invText.slice(0, 60).replace(/\n/g, ' '));
+  const invApi = await evalJs(`fetch('/api/reports/inventory',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.totals)`, true);
+  check('inventory api returns totals', invApi && invApi.items > 0 && invApi.cost_value > 0, JSON.stringify(invApi));
+  const invPrintHtml = await evalJs(`fetch('/api/print/inventory',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.text())`, true);
+  check('inventory print contains report header', invPrintHtml.includes('تقرير المخزون'), 'len=' + invPrintHtml.length);
+
+  phase = 'account-ledger';
+  await evalJs(`location.hash = '#/accounting'`);
+  await sleep(2000);
+  await evalJs(`(function(){const b=[...document.querySelectorAll('[data-tab]')].find(function(x){return x.dataset.tab==='accounts';});if(b)b.click();})()`);
+  await waitFor(`!!document.querySelector('[data-aledger]')`);
+  await sleep(600);
+  await evalJs(`document.querySelector('[data-aledger]').click()`);
+  await waitFor(`!!document.getElementById('ldPrint')`);
+  await sleep(700);
+  const ledgerText = await evalJs(`(function(){const ps=document.querySelectorAll('.modal-panel');return ps.length?ps[ps.length-1].innerText:'';})()`);
+  check('account ledger dialog opens', /دفتر الأستاذ/.test(ledgerText), ledgerText.slice(0, 50).replace(/\n/g, ' '));
+  await evalJs(`(function(){const ps=document.querySelectorAll('.modal-backdrop');if(ps.length){const b=ps[ps.length-1].querySelector('[data-close]');if(b)b.click();}})()`);
+  await sleep(500);
+
   phase = 'offline';
   const external = [...new Set(requests)].filter((u) => !u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:') && !u.startsWith('about:'));
   check('no external network requests (works offline)', external.length === 0, external.join(' , '));

@@ -108,6 +108,7 @@ function buildIncomeStatement(query = {}) {
 
 module.exports = {
   buildIncomeStatement,
+  buildInventoryReport,
   register(router) {
     router.get('/api/accounts', (ctx) => {
       const rows = db.all('SELECT * FROM accounts ORDER BY code');
@@ -381,5 +382,69 @@ module.exports = {
       const totals = rows.reduce((acc, r) => ({ debit: acc.debit + r.debit, credit: acc.credit + r.credit }), { debit: 0, credit: 0 });
       sendJson(ctx.res, 200, { rows, totals });
     });
+
+    router.get('/api/reports/inventory', (ctx) => {
+      sendJson(ctx.res, 200, buildInventoryReport(ctx.query));
+    });
   },
 };
+
+function buildInventoryReport(query = {}) {
+  const where = ['is_active = 1'];
+  const params = [];
+  if (query.category && query.category !== 'all') { where.push('category = ?'); params.push(query.category); }
+  if (query.search) {
+    where.push('(name LIKE ? OR sku LIKE ? OR barcode LIKE ?)');
+    const like = `%${query.search}%`;
+    params.push(like, like, like);
+  }
+  const rows = db.all(
+    `SELECT id, name, sku, barcode, category, unit, quantity, cost_price, sale_price, wholesale_price, reorder_level
+     FROM products WHERE ${where.join(' AND ')} ORDER BY category, name`,
+    params
+  ).map((p) => {
+    const qty = Number(p.quantity) || 0;
+    const cost = Number(p.cost_price) || 0;
+    const sale = Number(p.sale_price) || 0;
+    return {
+      ...p,
+      cost_value: Math.round(qty * cost * 100) / 100,
+      sale_value: Math.round(qty * sale * 100) / 100,
+      potential_profit: Math.round(qty * (sale - cost) * 100) / 100,
+    };
+  });
+  const byCategory = {};
+  for (const r of rows) {
+    const c = r.category || 'عام';
+    if (!byCategory[c]) byCategory[c] = { category: c, items: 0, quantity: 0, cost_value: 0, sale_value: 0 };
+    byCategory[c].items += 1;
+    byCategory[c].quantity += Number(r.quantity) || 0;
+    byCategory[c].cost_value += r.cost_value;
+    byCategory[c].sale_value += r.sale_value;
+  }
+  const categories = Object.values(byCategory).map((c) => ({
+    ...c,
+    quantity: Math.round(c.quantity * 100) / 100,
+    cost_value: Math.round(c.cost_value * 100) / 100,
+    sale_value: Math.round(c.sale_value * 100) / 100,
+  }));
+  const totals = rows.reduce(
+    (acc, r) => ({
+      items: acc.items + 1,
+      quantity: acc.quantity + (Number(r.quantity) || 0),
+      cost_value: acc.cost_value + r.cost_value,
+      sale_value: acc.sale_value + r.sale_value,
+    }),
+    { items: 0, quantity: 0, cost_value: 0, sale_value: 0 }
+  );
+  totals.quantity = Math.round(totals.quantity * 100) / 100;
+  totals.cost_value = Math.round(totals.cost_value * 100) / 100;
+  totals.sale_value = Math.round(totals.sale_value * 100) / 100;
+  totals.potential_profit = Math.round((totals.sale_value - totals.cost_value) * 100) / 100;
+  return {
+    generated_at: new Date().toLocaleString('ar-IQ'),
+    rows,
+    categories,
+    totals,
+  };
+}

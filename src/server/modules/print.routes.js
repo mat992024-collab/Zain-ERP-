@@ -484,6 +484,190 @@ module.exports = {
       sendText(ctx.res, 200, htmlDoc('تقرير Z', A4_CSS, body), 'text/html; charset=utf-8');
     });
 
+    router.get('/api/print/inventory', (ctx) => {
+      const data = accounting.buildInventoryReport(ctx.query);
+      const settings = db.getSettings();
+      const cur = settings.currency_symbol || 'د.ع';
+      const itemRows = data.rows.map((r) => `
+        <tr>
+          <td>${esc(r.name)}</td>
+          <td style="font-family:monospace;font-size:11px">${esc(r.sku || r.barcode || '')}</td>
+          <td>${esc(r.category || '')}</td>
+          <td style="text-align:left">${r.quantity}</td>
+          <td style="text-align:left">${money(r.cost_price, '')}</td>
+          <td style="text-align:left">${money(r.sale_price, '')}</td>
+          <td style="text-align:left;font-weight:bold">${money(r.cost_value, '')}</td>
+          <td style="text-align:left">${money(r.sale_value, '')}</td>
+        </tr>`).join('');
+      const catRows = data.categories.map((c) => `
+        <tr>
+          <td>${esc(c.category)}</td>
+          <td style="text-align:left">${c.items}</td>
+          <td style="text-align:left">${c.quantity}</td>
+          <td style="text-align:left;font-weight:bold">${money(c.cost_value, '')}</td>
+          <td style="text-align:left">${money(c.sale_value, '')}</td>
+        </tr>`).join('');
+      const body = `
+        <header>
+          <div>
+            ${tpl.logoTag(settings, 'print-logo logo-inline')}
+            <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
+            <div style="font-size:13px;color:#475569;margin-top:6px">
+              ${esc(settings.company_address || '')}<br/>
+              ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
+              ${tpl.taxIdLine(settings)}
+            </div>
+          </div>
+          <div class="meta">
+            <span class="badge">تقرير المخزون</span><br/><br/>
+            وقت الإصدار: ${esc(data.generated_at)}<br/>
+            ${ctx.query.category ? `التصنيف: ${esc(ctx.query.category)}<br/>` : ''}
+            ${ctx.query.search ? `بحث: ${esc(ctx.query.search)}<br/>` : ''}
+            عدد الأصناف: ${data.totals.items}
+          </div>
+        </header>
+        <div class="cards">
+          <div class="box"><div class="lbl">عدد الأصناف</div><div class="val">${data.totals.items}</div></div>
+          <div class="box"><div class="lbl">إجمالي الكميات</div><div class="val">${data.totals.quantity}</div></div>
+          <div class="box"><div class="lbl">قيمة المخزون بالتكلفة</div><div class="val" style="color:#4338ca">${money(data.totals.cost_value, cur)}</div></div>
+          <div class="box"><div class="lbl">قيمة المخزون بالبيع</div><div class="val" style="color:#059669">${money(data.totals.sale_value, cur)}</div></div>
+        </div>
+        <h2 style="font-size:16px;margin:22px 0 8px">الملخص حسب التصنيف</h2>
+        <table class="items">
+          <thead><tr><th>التصنيف</th><th style="text-align:left">الأصناف</th><th style="text-align:left">الكميات</th><th style="text-align:left">قيمة التكلفة</th><th style="text-align:left">قيمة البيع</th></tr></thead>
+          <tbody>${catRows || '<tr><td colspan="5" style="text-align:center;padding:16px">لا توجد أصناف</td></tr>'}</tbody>
+        </table>
+        <h2 style="font-size:16px;margin:22px 0 8px">تفاصيل الأصناف</h2>
+        <table class="items">
+          <thead><tr><th>الصنف</th><th>الرمز</th><th>التصنيف</th><th style="text-align:left">الكمية</th><th style="text-align:left">التكلفة</th><th style="text-align:left">سعر البيع</th><th style="text-align:left">قيمة التكلفة</th><th style="text-align:left">قيمة البيع</th></tr></thead>
+          <tbody>${itemRows || '<tr><td colspan="8" style="text-align:center;padding:16px">لا توجد أصناف</td></tr>'}</tbody>
+          <tfoot><tr>
+            <td colspan="3"><b>الإجمالي</b></td>
+            <td style="text-align:left"><b>${data.totals.quantity}</b></td>
+            <td style="text-align:left"></td>
+            <td style="text-align:left"></td>
+            <td style="text-align:left"><b>${money(data.totals.cost_value, '')}</b></td>
+            <td style="text-align:left"><b>${money(data.totals.sale_value, '')}</b></td>
+          </tr></tfoot>
+        </table>
+        <footer>
+          <div>${esc(settings.receipt_footer || '')}${tpl.footerExtra(settings)}</div>
+          <div style="text-align:left">أمين المخزن: ....................</div>
+        </footer>`;
+      sendText(ctx.res, 200, htmlDoc('تقرير المخزون', A4_CSS + tpl.extraCss(settings, true), body), 'text/html; charset=utf-8');
+    });
+
+    router.get('/api/print/account/:id', (ctx) => {
+      const account = db.get('SELECT * FROM accounts WHERE id = ?', [ctx.params.id]);
+      if (!account) return sendText(ctx.res, 404, 'الحساب غير موجود', 'text/plain; charset=utf-8');
+      const settings = db.getSettings();
+      const cur = settings.currency_symbol || 'د.ع';
+      const entries = db.all(
+        `SELECT * FROM account_entries WHERE account_id = ? ORDER BY id ASC LIMIT 2000`, [ctx.params.id]
+      );
+      let running = 0;
+      const rows = entries.map((e) => {
+        const debit = e.direction === 'debit' ? Number(e.amount) : 0;
+        const credit = e.direction === 'credit' ? Number(e.amount) : 0;
+        running += debit - credit;
+        return `
+        <tr>
+          <td style="white-space:nowrap">${esc(String(e.created_at || '').slice(0, 16))}</td>
+          <td>${esc(e.description || '')}</td>
+          <td style="font-family:monospace">${esc(e.ref || '')}</td>
+          <td style="text-align:left">${debit ? money(debit, '') : '—'}</td>
+          <td style="text-align:left">${credit ? money(credit, '') : '—'}</td>
+          <td style="text-align:left;font-weight:bold">${money(running, '')}</td>
+        </tr>`;
+      }).join('');
+      const body = `
+        <header>
+          <div>
+            ${tpl.logoTag(settings, 'print-logo logo-inline')}
+            <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
+            <div style="font-size:13px;color:#475569;margin-top:6px">
+              ${esc(settings.company_address || '')}<br/>
+              ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
+            </div>
+          </div>
+          <div class="meta">
+            <span class="badge">دفتر أستاذ الحساب</span><br/><br/>
+            <b>${esc(account.code)} — ${esc(account.name)}</b><br/>
+            النوع: ${esc({ asset: 'أصول', liability: 'التزامات', equity: 'حقوق ملكية', revenue: 'إيرادات', expense: 'مصروفات', cash: 'نقدية' }[account.type] || account.type)}<br/>
+            تاريخ الإصدار: ${esc(new Date().toLocaleString('ar-IQ'))}
+          </div>
+        </header>
+        <div class="cards">
+          <div class="box"><div class="lbl">عدد القيود</div><div class="val">${entries.length}</div></div>
+          <div class="box"><div class="lbl">إجمالي المدين</div><div class="val">${money(entries.reduce((s, e) => s + (e.direction === 'debit' ? Number(e.amount) : 0), 0), cur)}</div></div>
+          <div class="box"><div class="lbl">إجمالي الدائن</div><div class="val">${money(entries.reduce((s, e) => s + (e.direction === 'credit' ? Number(e.amount) : 0), 0), cur)}</div></div>
+          <div class="box"><div class="lbl">الرصيد</div><div class="val" style="color:#4338ca">${money(running, cur)}</div></div>
+        </div>
+        <table class="items">
+          <thead><tr><th>التاريخ</th><th>البيان</th><th>المرجع</th><th>مدين</th><th>دائن</th><th>الرصيد</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6" style="text-align:center;padding:18px">لا توجد قيود</td></tr>'}</tbody>
+        </table>
+        <footer>
+          <div>${esc(settings.receipt_footer || '')}${tpl.footerExtra(settings)}</div>
+          <div style="text-align:left">المحاسب: ....................</div>
+        </footer>`;
+      sendText(ctx.res, 200, htmlDoc(`دفتر ${account.name}`, A4_CSS + tpl.extraCss(settings, true), body), 'text/html; charset=utf-8');
+    });
+
+    router.get('/api/print/product-movements/:id', (ctx) => {
+      const product = db.get('SELECT * FROM products WHERE id = ?', [ctx.params.id]);
+      if (!product) return sendText(ctx.res, 404, 'الصنف غير موجود', 'text/plain; charset=utf-8');
+      const settings = db.getSettings();
+      const cur = settings.currency_symbol || 'د.ع';
+      const movements = db.all(
+        `SELECT m.*, u.full_name AS user_name FROM stock_movements m LEFT JOIN users u ON u.id = m.user_id
+         WHERE m.product_id = ? ORDER BY m.id DESC LIMIT 1000`, [ctx.params.id]
+      );
+      const rows = movements.map((m) => `
+        <tr>
+          <td style="white-space:nowrap">${esc(String(m.created_at || '').slice(0, 16))}</td>
+          <td>${esc(m.direction === 'in' ? 'وارد' : m.direction === 'out' ? 'منصرف' : 'تسوية')}</td>
+          <td>${esc(m.reason || '')}</td>
+          <td style="font-family:monospace">${esc(m.ref_table || '')}${m.ref_id ? ' #' + m.ref_id : ''}</td>
+          <td style="text-align:left">${m.direction === 'out' ? '-' : m.direction === 'in' ? '+' : ''}${m.qty}</td>
+          <td style="text-align:left;font-weight:bold">${m.balance_after}</td>
+          <td>${esc(m.user_name || '')}</td>
+        </tr>`).join('');
+      const body = `
+        <header>
+          <div>
+            ${tpl.logoTag(settings, 'print-logo logo-inline')}
+            <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
+            <div style="font-size:13px;color:#475569;margin-top:6px">
+              ${esc(settings.company_address || '')}<br/>
+              ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
+            </div>
+          </div>
+          <div class="meta">
+            <span class="badge">تقرير حركة صنف</span><br/><br/>
+            <b>${esc(product.name)}</b><br/>
+            ${product.sku ? 'الرمز: ' + esc(product.sku) + '<br/>' : ''}
+            ${product.barcode ? 'الباركود: ' + esc(product.barcode) + '<br/>' : ''}
+            تاريخ الإصدار: ${esc(new Date().toLocaleString('ar-IQ'))}
+          </div>
+        </header>
+        <div class="cards">
+          <div class="box"><div class="lbl">الرصيد الحالي</div><div class="val">${product.quantity} ${esc(product.unit || '')}</div></div>
+          <div class="box"><div class="lbl">تكلفة الوحدة</div><div class="val">${money(product.cost_price, cur)}</div></div>
+          <div class="box"><div class="lbl">سعر البيع</div><div class="val">${money(product.sale_price, cur)}</div></div>
+          <div class="box"><div class="lbl">عدد الحركات</div><div class="val">${movements.length}</div></div>
+        </div>
+        <table class="items">
+          <thead><tr><th>التاريخ</th><th>النوع</th><th>السبب</th><th>المرجع</th><th>الكمية</th><th>الرصيد بعدها</th><th>المستخدم</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="7" style="text-align:center;padding:18px">لا توجد حركات</td></tr>'}</tbody>
+        </table>
+        <footer>
+          <div>${esc(settings.receipt_footer || '')}${tpl.footerExtra(settings)}</div>
+          <div style="text-align:left">أمين المخزن: ....................</div>
+        </footer>`;
+      sendText(ctx.res, 200, htmlDoc(`حركة ${product.name}`, A4_CSS + tpl.extraCss(settings, true), body), 'text/html; charset=utf-8');
+    });
+
     router.get('/api/print/barcode/:productId', (ctx) => {
       const p = db.get('SELECT * FROM products WHERE id = ?', [ctx.params.productId]);
       if (!p) return sendText(ctx.res, 404, 'Not found', 'text/plain; charset=utf-8');

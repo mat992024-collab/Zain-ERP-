@@ -234,6 +234,10 @@ async function movements(productId) {
     title: 'حركات المخزون',
     size: 'max-w-2xl',
     body: `<table class="w-full"><thead><tr><th class="th">التاريخ</th><th class="th">الحركة</th><th class="th">الكمية</th><th class="th">الرصيد</th><th class="th">السبب</th></tr></thead><tbody>${data.rows.map((m) => `<tr class="tr"><td class="td">${m.created_at}</td><td class="td">${m.direction === 'in' ? '<span class="badge badge-ok">إدخال</span>' : '<span class="badge badge-danger">إخراج</span>'}</td><td class="td">${num(m.qty)}</td><td class="td">${num(m.balance_after)}</td><td class="td">${esc(m.reason || '')}</td></tr>`).join('')}</tbody></table>`,
+    footer: `<button data-close class="btn btn-ghost">إغلاق</button><button id="mvPrint" class="btn btn-primary"><i class="bi bi-printer"></i> طباعة حركة الصنف</button>`,
+    onMount(wrap) {
+      wrap.querySelector('#mvPrint').addEventListener('click', () => openPrint(`/api/print/product-movements/${productId}`));
+    },
   });
 }
 

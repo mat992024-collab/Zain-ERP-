@@ -1,4 +1,4 @@
-import { api, state, money, num, esc, toast, modal, emptyState } from '../core.js';
+import { api, state, money, num, esc, toast, modal, emptyState, openPrint } from '../core.js';
 
 export async function renderAi(c) {
   const [analysis, forecast, suggest] = await Promise.all([
@@ -67,11 +67,28 @@ export async function renderAi(c) {
 }
 
 export async function renderReports(c) {
+  c.innerHTML = `
+    <div class="flex gap-2 mb-3">
+      <button data-rtab="sales" class="btn btn-primary"><i class="bi bi-graph-up"></i> المبيعات والأرباح</button>
+      <button data-rtab="inventory" class="btn btn-ghost"><i class="bi bi-box-seam"></i> تقرير المخزون</button>
+    </div>
+    <div id="repPane"></div>`;
+  const pane = () => c.querySelector('#repPane');
+  c.querySelectorAll('[data-rtab]').forEach((b) => b.addEventListener('click', () => {
+    c.querySelectorAll('[data-rtab]').forEach((x) => { x.className = 'btn btn-ghost'; });
+    b.className = 'btn btn-primary';
+    open(b.dataset.rtab);
+  }));
+  const open = (key) => (key === 'inventory' ? inventory(pane()) : sales(pane()));
+  sales(pane());
+}
+
+async function sales(p) {
   const summary = await api('GET', '/api/reports/summary');
   const maxDay = Math.max(1, ...summary.daily.map((d) => Number(d.total)));
   const payLabels = { cash: 'نقدي', card: 'بطاقة', credit: 'آجل', bank: 'بنكي', transfer: 'تحويل' };
 
-  c.innerHTML = `
+  p.innerHTML = `
     <div class="kpi-row">
       <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-cart-check"></i></div><div><div class="kpi-value">${money(summary.revenue)}</div><div class="kpi-label">صافي المبيعات (30 يوم)</div></div></div>
       <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-graph-up"></i></div><div><div class="kpi-value">${money(summary.gross_profit)}</div><div class="kpi-label">الربح الإجمالي</div></div></div>
@@ -96,7 +113,7 @@ export async function renderReports(c) {
           <div class="font-black mb-3 flex items-center gap-2"><i class="bi bi-credit-card text-zain-600"></i> المبيعات حسب طريقة الدفع</div>
           ${summary.by_payment.length ? summary.by_payment.map((p) => {
             const pct = summary.revenue ? Math.round((Number(p.total) / Number(summary.sales || 1)) * 100) : 0;
-            return `<div class="mb-3"><div class="flex justify-between text-sm mb-1"><span>${esc(payLabels[p.payment_method] || p.payment_method)}</span><span class="font-bold">${money(p.total)}</span></div><div class="w-full bg-slate-100 rounded-full h-2"><div class="bg-zain-500 h-2 rounded-full" style="width:${Math.min(100, pct)}%"></div></div></div>`;
+            return `<div class="mb-3"><div class="flex justify-between text-sm mb-1"><span>${esc(payLabels[p.payment_method] || p.payment_method)}</span><span class="font-bold">${money(p.total)}</span></div><div class="w-full bg-slate-100 rounded-full h-2"><div class="bg-zain-500 rounded-full h-2" style="width:${Math.min(100, pct)}%"></div></div></div>`;
           }).join('') : '<div class="text-slate-400 text-sm">لا توجد بيانات</div>'}
         </div>
         <div class="card p-4 space-y-2 text-sm">
@@ -108,4 +125,65 @@ export async function renderReports(c) {
         </div>
       </div>
     </div>`;
+}
+
+async function inventory(p) {
+  const data = await api('GET', '/api/reports/inventory');
+  const catRows = data.categories.map((c) => `
+    <tr class="tr">
+      <td class="td font-bold">${esc(c.category)}</td>
+      <td class="td">${num(c.items)}</td>
+      <td class="td">${num(c.quantity)}</td>
+      <td class="td font-bold text-zain-700">${money(c.cost_value, '')}</td>
+      <td class="td text-emerald-600">${money(c.sale_value, '')}</td>
+    </tr>`).join('');
+  const itemRows = data.rows.map((r) => `
+    <tr class="tr">
+      <td class="td font-bold">${esc(r.name)}</td>
+      <td class="td font-mono text-xs">${esc(r.sku || r.barcode || '-')}</td>
+      <td class="td text-xs">${esc(r.category || '-')}</td>
+      <td class="td ${Number(r.quantity) <= Number(r.reorder_level) ? 'text-rose-600 font-bold' : ''}">${num(r.quantity)}</td>
+      <td class="td">${money(r.cost_price, '')}</td>
+      <td class="td">${money(r.sale_price, '')}</td>
+      <td class="td font-bold">${money(r.cost_value, '')}</td>
+      <td class="td text-emerald-600">${money(r.sale_value, '')}</td>
+    </tr>`).join('');
+
+  p.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-boxes"></i></div><div><div class="kpi-value">${num(data.totals.items)}</div><div class="kpi-label">عدد الأصناف</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-indigo-100 text-indigo-700"><i class="bi bi-collection"></i></div><div><div class="kpi-value">${num(data.totals.quantity)}</div><div class="kpi-label">إجمالي الكميات</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-amber-100 text-amber-700"><i class="bi bi-cash-coin"></i></div><div><div class="kpi-value">${money(data.totals.cost_value)}</div><div class="kpi-label">قيمة المخزون بالتكلفة</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-graph-up-arrow"></i></div><div><div class="kpi-value">${money(data.totals.sale_value)}</div><div class="kpi-label">قيمة المخزون بالبيع</div></div></div>
+    </div>
+
+    <div class="grid grid-cols-12 gap-4">
+      <div class="col-span-5 card">
+        <div class="p-4 border-b border-slate-100 font-black flex items-center justify-between">
+          <span><i class="bi bi-diagram-3 text-zain-600"></i> الملخص حسب التصنيف</span>
+          <button id="invPrint" class="btn btn-primary btn-sm"><i class="bi bi-printer"></i> طباعة التقرير</button>
+        </div>
+        <div class="overflow-auto max-h-[56vh]"><table class="w-full">
+          <thead><tr><th class="th">التصنيف</th><th class="th">الأصناف</th><th class="th">الكميات</th><th class="th">قيمة التكلفة</th><th class="th">قيمة البيع</th></tr></thead>
+          <tbody>${catRows || `<tr><td colspan="5" class="td text-center text-slate-400 py-8">لا توجد أصناف</td></tr>`}</tbody>
+          <tfoot><tr class="tr bg-slate-50">
+            <td class="td font-black">الإجمالي</td>
+            <td class="td font-black">${num(data.totals.items)}</td>
+            <td class="td font-black">${num(data.totals.quantity)}</td>
+            <td class="td font-black text-zain-700">${money(data.totals.cost_value, '')}</td>
+            <td class="td font-black text-emerald-600">${money(data.totals.sale_value, '')}</td>
+          </tr></tfoot>
+        </table></div>
+      </div>
+
+      <div class="col-span-7 card">
+        <div class="p-4 border-b border-slate-100 font-black"><i class="bi bi-list-ul text-zain-600"></i> تفاصيل الأصناف</div>
+        <div class="overflow-auto max-h-[56vh]"><table class="w-full">
+          <thead><tr><th class="th">الصنف</th><th class="th">الرمز</th><th class="th">التصنيف</th><th class="th">الكمية</th><th class="th">التكلفة</th><th class="th">سعر البيع</th><th class="th">قيمة التكلفة</th><th class="th">قيمة البيع</th></tr></thead>
+          <tbody>${itemRows || `<tr><td colspan="8" class="td text-center text-slate-400 py-8">لا توجد أصناف</td></tr>`}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+
+  p.querySelector('#invPrint').addEventListener('click', () => openPrint('/api/print/inventory'));
 }

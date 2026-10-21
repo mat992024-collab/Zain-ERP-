@@ -306,13 +306,40 @@ export async function renderAccounting(c) {
         <td class="td"><span style="padding-right:${depth * 18}px" class="font-bold ${depth === 0 ? 'text-zain-700' : ''}">${esc(a.code)} — ${esc(a.name)}</span></td>
         <td class="td"><span class="badge badge-mute">${esc(a.type)}</span></td>
         <td class="td font-bold ${a.computed_balance >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${money(a.computed_balance, '')}</td>
-        <td class="td">${a.is_system ? '<span class="badge badge-info">نظامي</span>' : `<button data-adel="${a.id}" class="text-rose-400 hover:text-rose-600"><i class="bi bi-trash3"></i></button>`}</td>
+        <td class="td"><div class="flex gap-1">
+          <button data-aledger="${a.id}" class="btn btn-ghost btn-sm" title="دفتر الأستاذ"><i class="bi bi-journal-text"></i></button>
+          <button data-aprint="${a.id}" class="btn btn-ghost btn-sm" title="طباعة"><i class="bi bi-printer"></i></button>
+          ${a.is_system ? '<span class="badge badge-info">نظامي</span>' : `<button data-adel="${a.id}" class="text-rose-400 hover:text-rose-600"><i class="bi bi-trash3"></i></button>`}
+        </div></td>
       </tr>${a.children ? render(a.children, depth + 1) : ''}`).join('');
     p.innerHTML = `
       <div class="card">
         <div class="p-4 flex justify-between items-center border-b border-slate-100"><div class="font-black">شجرة الحسابات</div><button id="acAdd" class="btn btn-primary"><i class="bi bi-plus-lg"></i> حساب جديد</button></div>
         <div class="overflow-auto max-h-[62vh]"><table class="w-full"><thead><tr><th class="th">الحساب</th><th class="th">النوع</th><th class="th">الرصيد</th><th class="th"></th></tr></thead><tbody>${render(data.tree)}</tbody></table></div>
       </div>`;
+    p.querySelectorAll('[data-aprint]').forEach((b) => b.addEventListener('click', () => openPrint(`/api/print/account/${b.dataset.aprint}`)));
+    p.querySelectorAll('[data-aledger]').forEach((b) => b.addEventListener('click', async () => {
+      const id = b.dataset.aledger;
+      const acc = data.accounts.find((a) => String(a.id) === String(id));
+      const entries = await api('GET', `/api/accounts/${id}/entries`);
+      let running = 0;
+      modal({
+        title: `دفتر الأستاذ — ${acc ? acc.code + ' ' + acc.name : ''}`,
+        size: 'max-w-3xl',
+        body: `<div class="overflow-auto max-h-[60vh]"><table class="w-full">
+          <thead><tr><th class="th">التاريخ</th><th class="th">البيان</th><th class="th">المرجع</th><th class="th">مدين</th><th class="th">دائن</th><th class="th">الرصيد</th></tr></thead>
+          <tbody>${entries.entries.length ? entries.entries.map((e) => {
+            running += (e.direction === 'debit' ? Number(e.amount) : 0) - (e.direction === 'credit' ? Number(e.amount) : 0);
+            return `<tr class="tr"><td class="td text-xs">${esc(String(e.created_at).slice(0, 16))}</td><td class="td">${esc(e.description || '-')}</td><td class="td font-mono text-xs">${esc(e.ref || '')}</td><td class="td">${e.direction === 'debit' ? money(e.amount, '') : '—'}</td><td class="td">${e.direction === 'credit' ? money(e.amount, '') : '—'}</td><td class="td font-bold">${money(running, '')}</td></tr>`;
+          }).join('') : '<tr><td colspan="6" class="td text-center text-slate-400 py-6">لا توجد قيود</td></tr>'}</tbody>
+        </table></div>
+        <p class="text-xs text-slate-500 mt-2">الرصيد الحالي: <b>${money(entries.balance, '')}</b></p>`,
+        footer: `<button data-close class="btn btn-ghost">إغلاق</button><button id="ldPrint" class="btn btn-primary"><i class="bi bi-printer"></i> طباعة</button>`,
+        onMount(wrap) {
+          wrap.querySelector('#ldPrint').addEventListener('click', () => openPrint(`/api/print/account/${id}`));
+        },
+      });
+    }));
     p.querySelector('#acAdd').addEventListener('click', () => {
       modal({
         title: 'حساب جديد',
