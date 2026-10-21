@@ -4,6 +4,7 @@ const os = require('node:os');
 const db = require('./db');
 const { Router, HttpError, sendJson, sendText, readBody, serveStatic, notFound } = require('./core/http');
 const auth = require('./core/auth');
+const jobs = require('./core/jobs');
 
 const WEB_DIR = path.join(__dirname, '..', 'web');
 
@@ -118,7 +119,9 @@ function createServer() {
   const sweeper = setInterval(() => auth.sweep(), 1000 * 60 * 30);
   sweeper.unref();
 
-  server.on('close', () => db.close());
+  const jobTimer = jobs.start();
+
+  server.on('close', () => { clearInterval(jobTimer); db.close(); });
   return { server, router };
 }
 

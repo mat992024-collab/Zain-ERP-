@@ -97,6 +97,29 @@ export async function renderAdmin(c) {
     try { await api('DELETE', `/api/backup/${encodeURIComponent(b.dataset.bkDel)}`); toast('تم الحذف', 'success'); await renderAdmin(c); }
     catch (e) { toast(e.message, 'error'); }
   }));
+  const bkAutoSave = c.querySelector('#bkAutoSave');
+  if (bkAutoSave) bkAutoSave.addEventListener('click', async () => {
+    bkAutoSave.disabled = true;
+    try {
+      await api('PUT', '/api/backup/auto', {
+        enabled: c.querySelector('#bkAutoEnabled').checked ? 1 : 0,
+        time: c.querySelector('#bkAutoTime').value,
+        keep: Number(c.querySelector('#bkAutoKeep').value),
+      });
+      toast('تم حفظ إعدادات النسخ التلقائي', 'success');
+      await renderAdmin(c);
+    } catch (e) { toast(e.message, 'error'); bkAutoSave.disabled = false; }
+  });
+  const bkAutoRun = c.querySelector('#bkAutoRun');
+  if (bkAutoRun) bkAutoRun.addEventListener('click', async () => {
+    bkAutoRun.disabled = true;
+    try {
+      await api('POST', '/api/backup/auto/run');
+      toast('تم إنشاء نسخة احتياطية تلقائية', 'success');
+      await renderAdmin(c);
+    } catch (e) { toast(e.message, 'error'); bkAutoRun.disabled = false; }
+  });
+
   const uploadInput = c.querySelector('#bkUpload');
   if (uploadInput) uploadInput.addEventListener('change', async () => {
     const file = uploadInput.files && uploadInput.files[0];
@@ -180,6 +203,7 @@ export async function renderAdmin(c) {
 
   function backupCard(res) {
     const rows = res.backups || [];
+    const auto = res.auto || { enabled: false, time: '02:00', keep: 7, last: '', next: '' };
     return `
       <div class="card mt-4" id="backupCard">
         <div class="p-4 flex justify-between items-center border-b border-slate-100">
@@ -189,12 +213,24 @@ export async function renderAdmin(c) {
             <button id="bkCreate" class="btn btn-primary"><i class="bi bi-download"></i> نسخة احتياطية الآن</button>
           </div>
         </div>
+        <div class="p-4 border-b border-slate-100 bg-slate-50">
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="font-black text-sm"><i class="bi bi-clock-history text-zain-600"></i> النسخ التلقائي اليومي</div>
+            <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" id="bkAutoEnabled" ${auto.enabled ? 'checked' : ''} class="w-4 h-4 accent-zain-600" /> تفعيل</label>
+            <div class="flex items-center gap-2 text-sm"><span class="text-slate-500">الساعة</span><input type="time" id="bkAutoTime" class="field !w-28" value="${esc(auto.time || '02:00')}" /></div>
+            <div class="flex items-center gap-2 text-sm"><span class="text-slate-500">عدد النسخ المحفوظة</span><input type="number" id="bkAutoKeep" min="1" max="90" class="field !w-20" value="${esc(String(auto.keep || 7))}" /></div>
+            <button id="bkAutoSave" class="btn btn-ghost btn-sm"><i class="bi bi-check2"></i> حفظ</button>
+            <button id="bkAutoRun" class="btn btn-ghost btn-sm"><i class="bi bi-play-fill"></i> تشغيل الآن</button>
+            <div class="text-xs text-slate-500 w-full">آخر نسخة تلقائية: <span class="font-bold">${esc(auto.last || 'لا يوجد')}</span> — النسخة القادمة: <span class="font-bold">${auto.next ? esc(new Date(auto.next).toLocaleString('ar-IQ')) : '-'}</span></div>
+          </div>
+        </div>
         <div class="p-4">
           <p class="text-xs text-slate-500 mb-3">تُحفظ النسخ داخل مجلد <span class="font-mono">data/backups</span> على هذا الجهاز. حجم القاعدة الحالية: ${(res.db_size / 1024).toFixed(0)} كيلوبايت.</p>
           ${rows.length ? `<div class="overflow-auto max-h-64"><table class="w-full">
-            <thead><tr><th class="th">الملف</th><th class="th">التاريخ</th><th class="th">الحجم</th><th class="th"></th></tr></thead>
+            <thead><tr><th class="th">الملف</th><th class="th">النوع</th><th class="th">التاريخ</th><th class="th">الحجم</th><th class="th"></th></tr></thead>
             <tbody>${rows.map((b) => `<tr class="tr">
               <td class="td font-mono text-xs">${esc(b.name)}</td>
+              <td class="td">${b.name.startsWith('zain-auto-') ? '<span class="badge badge-info">تلقائي</span>' : '<span class="badge badge-mute">يدوي</span>'}</td>
               <td class="td text-xs">${esc(new Date(b.created_at).toLocaleString('ar-IQ'))}</td>
               <td class="td text-xs">${(b.size / 1024).toFixed(0)} KB</td>
               <td class="td"><div class="flex gap-1">

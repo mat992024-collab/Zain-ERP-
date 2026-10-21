@@ -7,11 +7,61 @@ const { requirePerm } = require('../core/csv');
 
 const BACKUP_DIR = path.join(db.DATA_DIR, 'backups', path.basename(db.DB_PATH).replace(/\.db$/, ''));
 const MAGIC = 'SQLite format 3';
+const AUTO_PREFIX = 'zain-auto-';
+
+function localDate(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 function stamp() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+function autoState() {
+  const enabled = db.getSetting('auto_backup', '0') === '1';
+  const time = db.getSetting('auto_backup_time', '02:00');
+  const keep = Math.max(1, Math.min(Number(db.getSetting('auto_backup_keep', '7')) || 7, 90));
+  const last = db.getSetting('auto_backup_last', '');
+  const now = new Date();
+  const [hh, mm] = String(time).split(':').map((n) => Number(n) || 0);
+  const nextRun = new Date(now);
+  nextRun.setHours(hh || 0, mm || 0, 0, 0);
+  if (nextRun.getTime() <= now.getTime()) nextRun.setDate(nextRun.getDate() + 1);
+  return {
+    enabled,
+    time,
+    keep,
+    last,
+    today: localDate(now),
+    next: nextRun.toISOString(),
+    auto_count: listBackups().filter((b) => b.name.startsWith(AUTO_PREFIX)).length,
+  };
+}
+
+function pruneAuto(keep) {
+  if (!fs.existsSync(BACKUP_DIR)) return;
+  const files = fs.readdirSync(BACKUP_DIR).filter((f) => f.startsWith(AUTO_PREFIX) && f.endsWith('.db')).sort();
+  const extra = files.length - keep;
+  for (let i = 0; i < extra; i++) {
+    try { fs.unlinkSync(path.join(BACKUP_DIR, files[i])); } catch { }
+  }
+}
+
+function createAutoSnapshot() {
+  const keep = autoState().keep;
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const name = `${AUTO_PREFIX}${stamp()}.db`;
+  const file = path.join(BACKUP_DIR, name);
+  if (fs.existsSync(file)) fs.unlinkSync(file);
+  db.conn().exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+  const stat = fs.statSync(file);
+  db.setSetting('auto_backup_last', localDate(), 'backup');
+  pruneAuto(keep);
+  db.logActivity(null, 'backup_auto', 'system', null, { name, size: stat.size });
+  return { name, size: stat.size, created_at: stat.mtime.toISOString() };
 }
 
 function listBackups() {
@@ -27,7 +77,7 @@ function listBackups() {
 
 function safeName(name) {
   const clean = path.basename(String(name || ''));
-  if (!/^zain-backup-[0-9A-Za-z-]+\.db$/.test(clean)) throw new HttpError(400, 'اسم النسخة الاحتياطية غير صالح');
+  if (!/^zain-(backup|auto)-[0-9A-Za-z-]+\.db$/.test(clean)) throw new HttpError(400, 'اسم النسخة الاحتياطية غير صالح');
   return clean;
 }
 
@@ -73,6 +123,9 @@ function applyRestore(sourceFile) {
 }
 
 module.exports = {
+  autoState,
+  createAutoSnapshot,
+  localDate,
   register(router) {
     router.get('/api/backup', (ctx) => {
       requirePerm(ctx, 'backup.manage');
@@ -80,7 +133,32 @@ module.exports = {
         backups: listBackups(),
         db_path: db.DB_PATH,
         db_size: fs.existsSync(db.DB_PATH) ? fs.statSync(db.DB_PATH).size : 0,
+        auto: autoState(),
       });
+    });
+
+    router.put('/api/backup/auto', (ctx) => {
+      requirePerm(ctx, 'backup.manage');
+      const body = ctx.body || {};
+      if (body.enabled !== undefined) db.setSetting('auto_backup', body.enabled ? '1' : '0', 'backup');
+      if (body.time !== undefined) {
+        const time = String(body.time || '').trim();
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new HttpError(400, 'وقت النسخ التلقائي يجب أن يكون HH:MM');
+        db.setSetting('auto_backup_time', time, 'backup');
+      }
+      if (body.keep !== undefined) {
+        const keep = Number(body.keep);
+        if (!Number.isInteger(keep) || keep < 1 || keep > 90) throw new HttpError(400, 'عدد النسخ المحفوظة يجب أن يكون بين 1 و 90');
+        db.setSetting('auto_backup_keep', keep, 'backup');
+      }
+      db.logActivity(ctx.user.id, 'update', 'backup_auto', null, { enabled: body.enabled, time: body.time, keep: body.keep });
+      sendJson(ctx.res, 200, { ok: true, auto: autoState(), backups: listBackups() });
+    });
+
+    router.post('/api/backup/auto/run', (ctx) => {
+      requirePerm(ctx, 'backup.manage');
+      const info = createAutoSnapshot();
+      sendJson(ctx.res, 201, { ok: true, backup: info, auto: autoState(), backups: listBackups() });
     });
 
     router.post('/api/backup', (ctx) => {

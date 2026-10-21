@@ -337,6 +337,22 @@ async function main() {
   await evalJs(`(function(){const b=document.querySelector('.modal-backdrop [data-yes]');if(b)b.click();})()`);
   await sleep(300);
 
+  phase = 'auto-backup';
+  await evalJs(`location.hash = '#/admin'`);
+  await sleep(1500);
+  const autoBox = await evalJs(`(function(){const el=document.getElementById('backupCard');return el?el.innerText:'';})()`);
+  check('backup card shows auto backup section', /النسخ التلقائي اليومي/.test(autoBox), autoBox.slice(0, 60).replace(/\n/g, ' '));
+  await evalJs(`(function(){const b=document.getElementById('bkAutoEnabled');b.checked=true;b.dispatchEvent(new Event('change'));const t=document.getElementById('bkAutoTime');t.value='01:15';t.dispatchEvent(new Event('input'));})()`);
+  await evalJs(`document.getElementById('bkAutoSave').click()`);
+  await sleep(2000);
+  const autoState = await evalJs(`fetch('/api/backup',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.auto)`, true);
+  check('auto backup settings saved from UI', autoState && autoState.enabled === true && autoState.time === '01:15', JSON.stringify(autoState));
+  await evalJs(`document.getElementById('bkAutoRun').click()`);
+  await sleep(2500);
+  const autoList = await evalJs(`fetch('/api/backup',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.backups.map(b=>b.name))`, true);
+  check('auto backup snapshot created from UI', Array.isArray(autoList) && autoList.some((n) => n.startsWith('zain-auto-')), JSON.stringify(autoList));
+  await evalJs(`fetch('/api/backup/auto',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({enabled:false})})`, true);
+
   phase = 'statement';
   await evalJs(`location.hash = '#/customers'`);
   await sleep(1500);

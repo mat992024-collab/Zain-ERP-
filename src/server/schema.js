@@ -356,6 +356,10 @@ const DEFAULT_SETTINGS = [
   ["shift_required", "0", "pos"],
   ["credit_limit_mode", "warn", "financial"],
   ["statement_period_days", "90", "financial"],
+  ["auto_backup", "0", "backup"],
+  ["auto_backup_time", "02:00", "backup"],
+  ["auto_backup_keep", "7", "backup"],
+  ["auto_backup_last", "", "backup"],
 ];
 
 const INDUSTRY_PRESETS = {
