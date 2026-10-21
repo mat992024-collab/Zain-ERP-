@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Zain ERP - نظام زين المحاسبي</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%236366f1'/%3E%3Cpath d='M26 64l15-17 12 10 20-24' stroke='white' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/assets/vendor/cairo.css" />
+  <link rel="stylesheet" href="/assets/app.css" />
+  <link rel="stylesheet" href="/assets/vendor/bootstrap-icons.min.css" />
+  <style>
+    :root { --sidebar: 278px; }
+    .sidebar { width: var(--sidebar); background: radial-gradient(circle at 20% 10%, #4f46e5 0%, #312e81 95%); }
+    .main { margin-right: var(--sidebar); height: 100vh; overflow: auto; }
+    .pos-panel { height: calc(100vh - 72px); }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+
+<body>
+  <div id="app" class="h-full flex flex-col">
+    <div id="auth" class="fixed inset-0 bg-gradient-to-br from-zain-600 to-indigo-900 flex items-center justify-center p-4 print-hide">
+      <div class="card w-full max-w-md p-8 animate-slide-up">
+        <div class="flex flex-col items-center mb-8">
+          <div class="w-16 h-16 grid place-items-center rounded-2xl bg-zain-500 text-white text-3xl shadow-lg shadow-zain-500/25">
+            <i class="bi bi-graph-up-arrow"></i>
+          </div>
+          <h1 class="text-3xl font-black mt-4 text-slate-800">Zain ERP</h1>
+          <p class="text-sm text-slate-500 mt-1">نظام المحاسبة والشامل الذكي</p>
+        </div>
+        <form id="loginForm" class="space-y-4">
+          <div>
+            <label class="label">اسم المستخدم</label>
+            <input class="field" name="username" value="admin" autocomplete="username" />
+          </div>
+          <div>
+            <label class="label">كلمة المرور</label>
+            <input class="field" type="password" name="password" value="admin" autocomplete="current-password" />
+          </div>
+          <button type="submit" class="btn-primary w-full h-12 text-base">
+            <i class="bi bi-box-arrow-in-left"></i> تسجيل الدخول
+          </button>
+          <div id="loginError" class="hidden text-center text-xs font-bold text-rose-600"></div>
+        </form>
+        <div class="text-center text-[11px] text-slate-400 mt-6">
+          الإصدار 1.0.0 · متعدد الأنشطة · يعمل بدون إنترنت
+        </div>
+      </div>
+    </div>
+
+    <div id="main" class="hidden h-full">
+      <aside class="sidebar fixed right-0 top-0 bottom-0 text-white flex flex-col print-hide">
+        <div class="p-6 flex items-center gap-3 border-b border-white/10">
+          <div class="w-12 h-12 grid place-items-center rounded-xl bg-white/15 text-2xl">
+            <i class="bi bi-hexagon-fill"></i>
+          </div>
+          <div>
+            <h2 class="text-xl font-black">Zain</h2>
+            <p class="text-[11px] text-indigo-200">ERP · إدارة ذكية</p>
+          </div>
+        </div>
+        <nav id="nav" class="flex-1 p-4 space-y-1.5 overflow-auto hide-scrollbar"></nav>
+        <div class="p-4 border-t border-white/10 space-y-2">
+          <button id="shiftBtn" class="btn btn-ghost !text-indigo-50 !border-white/20 hover:!bg-white/15 w-full justify-between">
+            <span id="shiftText">الورديات</span>
+            <i class="bi bi-clock-history"></i>
+          </button>
+          <button id="settingsBtn" class="btn btn-ghost !text-indigo-50 !border-white/20 hover:!bg-white/15 w-full justify-between">
+            <span>الإعدادات</span>
+            <i class="bi bi-gear"></i>
+          </button>
+          <button id="logoutBtn" class="btn btn-ghost !text-indigo-50 !border-white/20 hover:!bg-white/15 w-full justify-between">
+            <span id="userInfo">تسجيل الخروج</span>
+            <i class="bi bi-box-arrow-right"></i>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main bg-slate-100">
+        <header class="print-hide h-[72px] bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-20 shadow-sm shadow-slate-500/5">
+          <div class="flex items-center gap-3">
+            <button class="btn btn-ghost h-10 w-10 p-0"><i class="bi bi-list text-lg"></i></button>
+            <h1 id="pageTitle" class="text-lg font-black text-slate-800">لوحة التحكم</h1>
+            <div id="statusBar" class="text-xs text-slate-500 pr-4 border-r border-slate-200 hidden"></div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="refreshBtn" class="btn btn-ghost"><i class="bi bi-arrow-clockwise"></i> تحديث</button>
+            <button id="posBtnTop" class="btn btn-primary"><i class="bi bi-cart-check"></i> نقاط البيع</button>
+          </div>
+        </header>
+        <section id="content" class="p-5 space-y-5"></section>
+      </main>
+    </div>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="toastRoot" class="fixed top-20 left-6 flex flex-col gap-2 z-[60] print-hide"></div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

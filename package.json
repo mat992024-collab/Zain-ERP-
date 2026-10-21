@@ -1,0 +1,25 @@
+{
+  "name": "zain-erp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zain - Multi-Industry ERP + AI Engine (lightweight desktop accounting system)",
+  "type": "commonjs",
+  "main": "src/launcher.js",
+  "scripts": {
+    "build:css": "tailwindcss -i ./src/web/styles.css -o ./src/web/assets/app.css --minify",
+    "watch:css": "tailwindcss -i ./src/web/styles.css -o ./src/web/assets/app.css --watch",
+    "start": "node src/launcher.js",
+    "serve": "node src/server/index.js",
+    "seed": "node src/server/seed.js",
+    "reset": "node src/server/reset.js",
+    "test": "npm run test:api && npm run test:render && npm run test:ui",
+    "test:api": "node tests/e2e.js",
+    "test:render": "node tests/render.test.mjs",
+    "test:ui": "node tests/browser.test.mjs"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.11",
+    "tailwindcss": "^4.1.11"
+  },
+  "dependencies": {}
+}

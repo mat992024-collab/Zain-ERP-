@@ -1,0 +1,235 @@
+const db = require('../db');
+const { sendJson, sendText } = require('../core/http');
+const code128 = require('../core/code128');
+
+function esc(str = '') {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function money(v, currency = 'د.ع') {
+  return `${(Number(v) || 0).toLocaleString('ar-IQ')} ${currency}`;
+}
+
+function htmlDoc(title, bodyCss, body, extraHead = '') {
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<title>${esc(title)}</title>
+${extraHead}
+<style>
+${bodyCss}
+@page { margin: 8mm; }
+@media print { .no-print { display: none !important; } }
+</style>
+</head>
+<body>${body}
+<div class="no-print" style="text-align:center;margin-top:12px">
+  <button onclick="window.print()" style="padding:8px 18px;cursor:pointer;background:#6366f1;color:#fff;border:0;border-radius:8px;font-family:sans-serif">طباعة</button>
+</div>
+</body></html>`;
+}
+
+const THERMAL_CSS = (mm) => `
+  * { box-sizing: border-box; }
+  body { font-family: 'Cairo','Segoe UI',Tahoma,sans-serif; direction: rtl; text-align: right;
+         width: ${mm}mm; margin: 0 auto; font-size: ${mm <= 58 ? 10 : 11}px; color: #000; padding: 3mm; }
+  .center { text-align: center; }
+  .line { border-top: 1px dashed #000; margin: 6px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: inherit; }
+  th, td { padding: 2px 0; font-weight: normal; vertical-align: top; }
+  .col-item { text-align: right; }
+  .col-qty, .col-price { text-align: left; white-space: nowrap; }
+  .total-row td { font-weight: bold; font-size: ${mm <= 58 ? 11 : 13}px; padding-top: 4px; }
+  h2 { font-size: ${mm <= 58 ? 13 : 15}px; margin: 4px 0; }
+  .muted { font-size: 10px; }
+`;
+
+function fetchInvoice(id) {
+  const invoice = db.get(
+    `SELECT i.*, c.name AS customer_name, c.phone AS customer_phone, u.full_name AS cashier_name
+     FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id
+     LEFT JOIN users u ON u.id = i.user_id WHERE i.id = ?`,
+    [id]
+  );
+  if (!invoice) return null;
+  const items = db.all('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
+  const settings = db.getSettings();
+  return { invoice, items, settings };
+}
+
+module.exports = {
+  register(router) {
+    router.get('/api/print/thermal/:id', (ctx) => {
+      const data = fetchInvoice(ctx.params.id);
+      if (!data) return sendText(ctx.res, 404, 'Not found', 'text/plain; charset=utf-8');
+      const mm = ctx.query.width === '58' ? 58 : 80;
+      const { invoice, items, settings } = data;
+      const cur = settings.currency_symbol || 'د.ع';
+      const rows = items
+        .map(
+          (i) => `<tr>
+            <td class="col-item">${esc(i.name)}<br/><span class="muted">${i.qty} × ${money(i.unit_price, '')}</span></td>
+            <td class="col-price">${money(i.total, '')}</td>
+          </tr>`
+        )
+        .join('');
+      const body = `
+        <div class="center"><h2>${esc(settings.company_name || 'Zain')}</h2>
+        <div class="muted">${esc(settings.company_address || '')} ${settings.company_phone ? ' · ' + esc(settings.company_phone) : ''}</div></div>
+        <div class="line"></div>
+        <div>رقم: <b>${esc(invoice.invoice_no)}</b></div>
+        <div>التاريخ: ${esc(invoice.created_at)}</div>
+        ${invoice.customer_name ? `<div>العميل: ${esc(invoice.customer_name)}</div>` : ''}
+        <div>الكاشير: ${esc(invoice.cashier_name || '-')}</div>
+        <div class="line"></div>
+        <table><thead><tr><th class="col-item">الصنف</th><th class="col-price">المبلغ</th></tr></thead><tbody>${rows}</tbody></table>
+        <div class="line"></div>
+        <table>
+          <tr><td>الإجمالي الفرعي</td><td class="col-price">${money(invoice.subtotal, cur)}</td></tr>
+          ${Number(invoice.discount) ? `<tr><td>الخصم</td><td class="col-price">-${money(invoice.discount, cur)}</td></tr>` : ''}
+          ${Number(invoice.tax) ? `<tr><td>الضريبة</td><td class="col-price">${money(invoice.tax, cur)}</td></tr>` : ''}
+          <tr class="total-row"><td>المجموع</td><td class="col-price">${money(invoice.total, cur)}</td></tr>
+          <tr><td>مدفوع (${esc(invoice.payment_method)})</td><td class="col-price">${money(invoice.paid, cur)}</td></tr>
+          ${Number(invoice.due) ? `<tr><td>متبقي</td><td class="col-price">${money(invoice.due, cur)}</td></tr>` : ''}
+        </table>
+        <div class="line"></div>
+        <div class="center muted">${esc(settings.receipt_footer || '')}</div>`;
+      sendText(ctx.res, 200, htmlDoc(invoice.invoice_no, THERMAL_CSS(mm), body), 'text/html; charset=utf-8');
+    });
+
+    router.get('/api/print/a4/:id', (ctx) => {
+      const data = fetchInvoice(ctx.params.id);
+      if (!data) return sendText(ctx.res, 404, 'Not found', 'text/plain; charset=utf-8');
+      const { invoice, items, settings } = data;
+      const cur = settings.currency_symbol || 'د.ع';
+      const rows = items
+        .map(
+          (i, idx) => `<tr>
+            <td style="width:30px;text-align:center">${idx + 1}</td>
+            <td>${esc(i.name)}</td>
+            <td style="text-align:center">${esc(i.unit || 'قطعة')}</td>
+            <td style="text-align:center">${i.qty}</td>
+            <td style="text-align:left">${money(i.unit_price, '')}</td>
+            <td style="text-align:left">${money(i.discount, '')}</td>
+            <td style="text-align:left">${money(i.total, '')}</td>
+          </tr>`
+        )
+        .join('');
+      const css = `
+        * { box-sizing: border-box; }
+        body { font-family: 'Cairo','Segoe UI',Tahoma,sans-serif; direction: rtl; text-align: right;
+               color: #0f172a; margin: 0; padding: 16px; }
+        header { display: flex; justify-content: space-between; align-items: flex-start;
+                 border-bottom: 3px solid #6366f1; padding-bottom: 12px; margin-bottom: 18px; }
+        h1 { margin: 0; font-size: 26px; color: #6366f1; }
+        .meta { text-align: left; font-size: 13px; line-height: 1.7; }
+        table.items { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+        table.items th { background: #eef2ff; color: #3730a3; padding: 9px 8px; border: 1px solid #c7d2fe; }
+        table.items td { padding: 7px 8px; border: 1px solid #e2e8f0; }
+        .totals { width: 320px; margin: 16px 0 0 auto; font-size: 14px; }
+        .totals div { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed #cbd5e1; }
+        .totals .grand { font-weight: bold; font-size: 17px; border-bottom: 0; color: #4338ca; }
+        footer { margin-top: 48px; display: flex; justify-content: space-between; font-size: 13px; color: #475569; }
+        .badge { display: inline-block; background: #f1f5f9; border: 1px solid #cbd5e1; padding: 4px 12px;
+                 border-radius: 999px; font-size: 12px; }
+      `;
+      const body = `
+        <header>
+          <div>
+            <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
+            <div style="font-size:13px;color:#475569;margin-top:6px">
+              ${esc(settings.company_address || '')}<br/>
+              ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
+              ${settings.company_tax_id ? '<br/>الرقم الضريبي: ' + esc(settings.company_tax_id) : ''}
+            </div>
+          </div>
+          <div class="meta">
+            <span class="badge">${invoice.type === 'sale' ? 'فاتورة مبيعات' : invoice.type === 'purchase' ? 'فاتورة مشتريات' : 'فاتورة'}</span><br/><br/>
+            <b>${esc(invoice.invoice_no)}</b><br/>
+            ${esc(invoice.created_at)}<br/>
+            ${invoice.customer_name ? 'العميل: ' + esc(invoice.customer_name) + '<br/>' : ''}
+            ${invoice.customer_phone ? 'الهاتف: ' + esc(invoice.customer_phone) + '<br/>' : ''}
+            الكاشير: ${esc(invoice.cashier_name || '-')}
+          </div>
+        </header>
+        <table class="items">
+          <thead><tr><th>#</th><th>الصنف</th><th>الوحدة</th><th>الكمية</th><th>السعر</th><th>الخصم</th><th>الإجمالي</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="totals">
+          <div><span>الإجمالي الفرعي</span><span>${money(invoice.subtotal, cur)}</span></div>
+          <div><span>الخصم</span><span>${money(invoice.discount, cur)}</span></div>
+          <div><span>الضريبة</span><span>${money(invoice.tax, cur)}</span></div>
+          <div class="grand"><span>المجموع</span><span>${money(invoice.total, cur)}</span></div>
+          <div><span>مدفوع</span><span>${money(invoice.paid, cur)}</span></div>
+          <div><span>المتبقي</span><span>${money(invoice.due, cur)}</span></div>
+        </div>
+        <footer>
+          <div>${esc(settings.receipt_footer || '')}</div>
+          <div style="text-align:left">التوقيع: ....................</div>
+        </footer>`;
+      sendText(ctx.res, 200, htmlDoc(invoice.invoice_no, css, body), 'text/html; charset=utf-8');
+    });
+
+    router.post('/api/print/labels', (ctx) => {
+      const items = (ctx.body || {}).items || [];
+      const settings = db.getSettings();
+      const labelW = Number(settings.label_width_mm) || 40;
+      const labelH = Number(settings.label_height_mm) || 30;
+      const repeats = Math.max(1, Math.min(Number((ctx.body || {}).repeats) || 1, 50));
+      const labels = [];
+      for (const item of items) {
+        const p = item.product_id ? db.get('SELECT * FROM products WHERE id = ?', [item.product_id]) : null;
+        const code = (p && p.barcode) || item.barcode || '';
+        if (!code) continue;
+        const name = (p && p.name) || item.name || '';
+        const price = Number((p && p.sale_price) || item.price || 0);
+        const sku = (p && (p.part_number || p.sku)) || '';
+        for (let r = 0; r < repeats; r++) {
+          labels.push({ code, name, price, sku });
+        }
+      }
+      const css = `
+        * { box-sizing: border-box; }
+        body { font-family: 'Cairo','Segoe UI',Tahoma,sans-serif; direction: rtl; margin: 0; padding: 6mm;
+               display: flex; flex-wrap: wrap; gap: 4mm; background: #fff; }
+        .label { width: ${labelW}mm; height: ${labelH}mm; border: 1px dashed #cbd5e1; padding: 2mm;
+                 text-align: center; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; }
+        .label .name { font-size: 9px; font-weight: bold; color: #0f172a; line-height: 1.15; max-height: 22px; overflow: hidden; }
+        .label .sku { font-size: 7px; color: #64748b; }
+        .label .price { font-size: 10px; font-weight: bold; color: #4338ca; }
+        .label svg { display: block; margin: 0 auto; }
+        .no-print { text-align: center; width: 100%; margin-bottom: 8px; }
+        .no-print button { padding: 8px 18px; cursor: pointer; background: #6366f1; color: #fff; border: 0; border-radius: 8px; }
+        @media print { .no-print { display: none; } .label { border: 0; } }
+        @page { margin: 6mm; }
+      `;
+      const body = `
+        <div class="no-print"><button onclick="window.print()">طباعة الملصقات (${labels.length})</button></div>
+        ${labels
+          .map(
+            (l) => `<div class="label">
+              <div class="name">${esc(l.name)}</div>
+              ${l.sku ? `<div class="sku">${esc(l.sku)}</div>` : ''}
+              <div>${code128.svg(l.code, { width: labelW * 3.4, height: 46, moduleWidth: 1, showText: true, color: '#000' })}</div>
+              <div class="price">${money(l.price, settings.currency_symbol || 'د.ع')}</div>
+            </div>`
+          )
+          .join('')}
+      `;
+      sendText(ctx.res, 200, htmlDoc('ملصقات الباركود', css, body), 'text/html; charset=utf-8');
+    });
+
+    router.get('/api/print/barcode/:productId', (ctx) => {
+      const p = db.get('SELECT * FROM products WHERE id = ?', [ctx.params.productId]);
+      if (!p) return sendText(ctx.res, 404, 'Not found', 'text/plain; charset=utf-8');
+      sendJson(ctx.res, 200, {
+        barcode: p.barcode,
+        svg: code128.svg(p.barcode || '', { width: 260, height: 60, showText: true }),
+      });
+    });
+  },
+};

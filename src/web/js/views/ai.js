@@ -1,0 +1,111 @@
+import { api, state, money, num, esc, toast, modal, emptyState } from '../core.js';
+
+export async function renderAi(c) {
+  const [analysis, forecast, suggest] = await Promise.all([
+    api('GET', '/api/ai/analysis'),
+    api('GET', '/api/ai/forecast'),
+    api('GET', '/api/ai/suggestions'),
+  ]);
+
+  const priorityClass = (p) => (p === 'high' ? 'border-rose-500 bg-rose-50' : p === 'medium' ? 'border-amber-500 bg-amber-50' : 'border-emerald-500 bg-emerald-50');
+  const conf = (v) => Math.round(Number(v) * 100);
+
+  c.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-graph-up-arrow"></i></div><div><div class="kpi-value">${num(analysis.top.length)}</div><div class="kpi-label">أصناف سريعة الحركة</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-rose-100 text-rose-700"><i class="bi bi-exclamation-triangle"></i></div><div><div class="kpi-value">${num(analysis.low.length)}</div><div class="kpi-label">أصناف تحتاج إعادة طلب</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-amber-100 text-amber-700"><i class="bi bi-hourglass-split"></i></div><div><div class="kpi-value">${num(analysis.slow.length)}</div><div class="kpi-label">أصناف بطيئة الحركة</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-indigo-100 text-indigo-700"><i class="bi bi-cpu"></i></div><div><div class="kpi-value">${num(forecast.list.length)}</div><div class="kpi-label">تنبؤات نفاد المخزون</div></div></div>
+    </div>
+
+    <div class="grid grid-cols-12 gap-4">
+      <div class="col-span-8 card">
+        <div class="p-4 border-b border-slate-100 font-black flex items-center gap-2"><i class="bi bi-magic text-zain-600"></i> تنبؤات نفاد المخزون (الذكاء الاصطناعي)</div>
+        <div class="overflow-auto max-h-[46vh]"><table class="w-full">
+          <thead><tr><th class="th">الصنف</th><th class="th">المخزون</th><th class="th">معدل البيع/يوم</th><th class="th">أيام حتى النفاد</th><th class="th">كمية مقترحة</th><th class="th">الثقة</th></tr></thead>
+          <tbody>${forecast.list.length ? forecast.list.map((f) => `<tr class="tr">
+            <td class="td font-bold">${esc(f.product_name)}</td>
+            <td class="td ${f.is_below_reorder ? 'text-rose-600 font-bold' : ''}">${num(f.quantity)} <span class="text-xs text-slate-400">/ ${num(f.reorder_level)}</span></td>
+            <td class="td">${num(Number(f.predicted_daily).toFixed(1))}</td>
+            <td class="td">${f.days_until_stockout != null ? `<span class="badge ${f.days_until_stockout <= 3 ? 'badge-danger' : f.days_until_stockout <= 7 ? 'badge-warn' : 'badge-ok'}">${num(f.days_until_stockout)} يوم</span>` : '—'}</td>
+            <td class="td font-bold text-zain-700">${num(f.suggested_qty)}</td>
+            <td class="td"><div class="w-20 bg-slate-100 rounded-full h-2"><div class="bg-zain-500 h-2 rounded-full" style="width:${conf(f.confidence)}%"></div></div></td>
+          </tr>`).join('') : `<tr><td colspan="6">${emptyState('bi-emoji-smile', 'لا توجد تنبؤات حالياً', 'البيانات غير كافية أو المخزون بحالة جيدة')}</td></tr>`}</tbody>
+        </table></div>
+      </div>
+
+      <div class="col-span-4 card">
+        <div class="p-4 border-b border-slate-100 font-black flex items-center gap-2"><i class="bi bi-lightbulb text-amber-500"></i> مقترحات ذكية</div>
+        <div class="p-3 space-y-2 overflow-auto max-h-[46vh]">
+          ${suggest.suggestions.length ? suggest.suggestions.map((s) => `<div class="border-r-4 ${priorityClass(s.priority)} rounded-lg p-3 cursor-pointer hover:shadow" data-goto="${s.product_id}">
+            <div class="font-bold text-sm">${esc(s.title)}</div><div class="text-xs text-slate-500 mt-1">${esc(s.body)}</div>
+          </div>`).join('') : emptyState('bi-lightbulb', 'لا توجد مقترحات حالياً')}
+        </div>
+      </div>
+
+      <div class="col-span-6 card">
+        <div class="p-4 border-b border-slate-100 font-black flex items-center gap-2"><i class="bi bi-fire text-rose-500"></i> الأكثر مبيعاً (30 يوم)</div>
+        <div class="overflow-auto max-h-[36vh]"><table class="w-full"><thead><tr><th class="th">الصنف</th><th class="th">المباع</th><th class="th">الإيراد</th></tr></thead>
+        <tbody>${analysis.top.length ? analysis.top.map((t) => `<tr class="tr"><td class="td font-bold">${esc(t.name)}</td><td class="td">${num(t.sold)}</td><td class="td text-zain-700 font-bold">${money(t.revenue)}</td></tr>`).join('') : '<tr><td colspan="3" class="td text-center text-slate-400 py-8">لا توجد بيانات</td></tr>'}</tbody></table></div>
+      </div>
+
+      <div class="col-span-6 card">
+        <div class="p-4 border-b border-slate-100 font-black flex items-center gap-2"><i class="bi bi-arrow-down-circle text-amber-500"></i> إعادة الطلب / بطيئة الحركة</div>
+        <div class="overflow-auto max-h-[36vh]"><table class="w-full"><thead><tr><th class="th">الصنف</th><th class="th">المخزون</th><th class="th">حد الطلب</th><th class="th">مباع</th></tr></thead>
+        <tbody>${[...analysis.low, ...analysis.slow].length ? [...analysis.low.map((t) => ({ ...t, tag: 'منخفض', sold: '—' })), ...analysis.slow.map((t) => ({ ...t, tag: 'بطيء', sold: t.sold }))].map((t) => `<tr class="tr"><td class="td font-bold">${esc(t.name)} <span class="badge ${t.tag === 'منخفض' ? 'badge-danger' : 'badge-warn'} mr-1">${t.tag}</span></td><td class="td">${num(t.quantity)}</td><td class="td text-slate-500">${num(t.reorder_level)}</td><td class="td">${esc(String(t.sold))}</td></tr>`).join('') : '<tr><td colspan="4" class="td text-center text-slate-400 py-8">لا توجد بيانات</td></tr>'}</tbody></table></div>
+      </div>
+    </div>`;
+
+  c.querySelectorAll('[data-goto]').forEach((el) => el.addEventListener('click', () => {
+    modal({
+      title: 'تفاصيل الصنف',
+      size: 'max-w-sm',
+      body: `<div class="text-center py-4"><i class="bi bi-cpu text-4xl text-zain-500"></i><p class="mt-3 text-slate-600">انتقل إلى المخزون للاطلاع على تفاصيل الصنف رقم <b>${el.dataset.goto}</b></p></div>`,
+      footer: `<button data-close class="btn btn-primary w-full">حسناً</button>`,
+    });
+  }));
+}
+
+export async function renderReports(c) {
+  const summary = await api('GET', '/api/reports/summary');
+  const maxDay = Math.max(1, ...summary.daily.map((d) => Number(d.total)));
+  const payLabels = { cash: 'نقدي', card: 'بطاقة', credit: 'آجل', bank: 'بنكي', transfer: 'تحويل' };
+
+  c.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-cart-check"></i></div><div><div class="kpi-value">${money(summary.revenue)}</div><div class="kpi-label">صافي المبيعات (30 يوم)</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-graph-up"></i></div><div><div class="kpi-value">${money(summary.gross_profit)}</div><div class="kpi-label">الربح الإجمالي</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-indigo-100 text-indigo-700"><i class="bi bi-cash-stack"></i></div><div><div class="kpi-value">${money(summary.net_profit)}</div><div class="kpi-label">الربح الصافي</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-rose-100 text-rose-700"><i class="bi bi-receipt-cutoff"></i></div><div><div class="kpi-value">${money(summary.expenses)}</div><div class="kpi-label">المصروفات</div></div></div>
+    </div>
+
+    <div class="grid grid-cols-12 gap-4">
+      <div class="col-span-8 card p-4">
+        <div class="font-black mb-4 flex items-center gap-2"><i class="bi bi-bar-chart text-zain-600"></i> المبيعات اليومية</div>
+        <div class="flex items-end gap-2 h-56">
+          ${summary.daily.length ? summary.daily.map((d) => `<div class="flex-1 flex flex-col items-center justify-end gap-1 group" title="${esc(d.day)}: ${money(d.total)}">
+            <span class="text-[10px] text-slate-400 opacity-0 group-hover:opacity-100">${money(d.total, '')}</span>
+            <div class="w-full bg-gradient-to-t from-zain-600 to-zain-400 rounded-t-lg transition-all" style="height:${Math.max(4, (Number(d.total) / maxDay) * 100)}%"></div>
+            <span class="text-[9px] text-slate-400 rotate-45 origin-right whitespace-nowrap">${esc(String(d.day).slice(5))}</span>
+          </div>`).join('') : '<div class="w-full text-center text-slate-400">لا توجد مبيعات في الفترة</div>'}
+        </div>
+      </div>
+
+      <div class="col-span-4 space-y-4">
+        <div class="card p-4">
+          <div class="font-black mb-3 flex items-center gap-2"><i class="bi bi-credit-card text-zain-600"></i> المبيعات حسب طريقة الدفع</div>
+          ${summary.by_payment.length ? summary.by_payment.map((p) => {
+            const pct = summary.revenue ? Math.round((Number(p.total) / Number(summary.sales || 1)) * 100) : 0;
+            return `<div class="mb-3"><div class="flex justify-between text-sm mb-1"><span>${esc(payLabels[p.payment_method] || p.payment_method)}</span><span class="font-bold">${money(p.total)}</span></div><div class="w-full bg-slate-100 rounded-full h-2"><div class="bg-zain-500 h-2 rounded-full" style="width:${Math.min(100, pct)}%"></div></div></div>`;
+          }).join('') : '<div class="text-slate-400 text-sm">لا توجد بيانات</div>'}
+        </div>
+        <div class="card p-4 space-y-2 text-sm">
+          <div class="flex justify-between"><span class="text-slate-500">عدد الفواتير</span><span class="font-bold">${num(summary.sales_count)}</span></div>
+          <div class="flex justify-between"><span class="text-slate-500">إجمالي المبيعات</span><span class="font-bold">${money(summary.sales)}</span></div>
+          <div class="flex justify-between"><span class="text-slate-500">المرتجعات</span><span class="font-bold text-rose-600">${money(summary.returns)}</span></div>
+          <div class="flex justify-between"><span class="text-slate-500">المشتريات</span><span class="font-bold">${money(summary.purchases)}</span></div>
+          <div class="flex justify-between border-t border-dashed pt-2"><span class="text-slate-500">تكلفة المبيعات</span><span class="font-bold">${money(summary.cogs)}</span></div>
+        </div>
+      </div>
+    </div>`;
+}
