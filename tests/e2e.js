@@ -76,6 +76,40 @@ const { start } = require('../src/server/index.js');
   r = await call('GET', `/api/print/barcode/${pid}`, null, token);
   ok('barcode svg endpoint', r.status === 200 && r.data.svg.includes('svg'));
 
+  r = await call('PUT', '/api/settings', {
+    company_tax_id: '9876543',
+    print_header_text: 'فرع الكرادة',
+    print_header_sub: 'خدمة على مدار الساعة',
+    print_footer_note: 'شكراً لزيارتكم',
+    print_invoice_note: 'البضاعة لا تُرد ولا تُستبدل بعد 3 أيام',
+    print_label_note: 'امسح الباركود لطلب الخدمة',
+    print_font_size: 'large',
+    print_density: 'compact',
+    print_show_logo: 1,
+    print_logo_data: 'data:image/png;base64,iVBORw0KGgo=',
+    print_show_tax_id: 1,
+    print_show_cashier: 0,
+  }, token);
+  ok('print template settings saved', r.status === 200 && r.data.settings.print_header_text === 'فرع الكرادة' && r.data.settings.print_font_size === 'large', JSON.stringify(r.data.settings && r.data.settings.print_header_text));
+  r = await call('GET', `/api/print/thermal/${1}?width=80`, null, token);
+  const thermalHtml = String(r.data);
+  ok('thermal shows header line', thermalHtml.includes('فرع الكرادة'), 'len=' + thermalHtml.length);
+  ok('thermal shows sub header', thermalHtml.includes('خدمة على مدار الساعة'));
+  ok('thermal shows footer note', thermalHtml.includes('شكراً لزيارتكم'));
+  ok('thermal shows logo', thermalHtml.includes('data:image/png;base64,iVBORw0KGgo='));
+  ok('thermal uses larger font size', thermalHtml.includes('body { font-size: 13px;'), 'font');
+  r = await call('GET', `/api/print/a4/${1}`, null, token);
+  const a4Html = String(r.data);
+  ok('a4 shows invoice note', a4Html.includes('البضاعة لا تُرد ولا تُستبدل بعد 3 أيام'));
+  ok('a4 hides cashier when disabled', !a4Html.includes('الكاشير:'), 'cashier');
+  ok('a4 shows tax id', a4Html.includes('الرقم الضريبي'), 'tax');
+  r = await call('POST', '/api/print/labels', { items: [{ product_id: pid, qty: 1 }], repeats: 1 }, token);
+  ok('labels show label footer', String(r.data).includes('مسح الباركود'), 'label');
+  r = await call('PUT', '/api/settings', { company_tax_id: '', print_header_text: '', print_header_sub: '', print_footer_note: '', print_invoice_note: '', print_label_note: '', print_show_logo: 0, print_logo_data: '', print_font_size: 'normal', print_density: 'normal', print_show_cashier: 1 }, token);
+  ok('print template settings reset', r.status === 200 && r.data.settings.print_header_text === '' && r.data.settings.print_show_logo === '0', JSON.stringify(r.data.settings && r.data.settings.print_header_text));
+  r = await call('GET', `/api/print/thermal/${1}?width=80`, null, token);
+  ok('thermal header cleared', !String(r.data).includes('فرع الكرادة'));
+
   r = await call('POST', '/api/sales', { items: [{ product_id: pid, qty: 2, unit_price: 500000 }], payment_method: 'cash', paid: 1000000 }, token);
   ok('cash sale', r.status === 201);
   r = await call('GET', `/api/products/${pid}`, null, token);

@@ -414,6 +414,33 @@ async function main() {
   check('barcode labels render as SVG', svgCount > 0, 'svg=' + svgCount);
   check('label shows product name', /صنف اختبار المتصفح/.test(labelText), labelText.slice(0, 40).replace(/\n/g, ' '));
 
+  phase = 'print-template';
+  await nav(BASE);
+  await waitFor(`document.querySelectorAll('#nav [data-nav]').length > 0`);
+  await sleep(1200);
+  await evalJs(`location.hash = '#/admin'`);
+  await sleep(1800);
+  await evalJs(`(function(){const b=document.getElementById('settingsBtn');if(b)b.click();})()`);
+  await waitFor(`!!document.getElementById('set_print_header_text')`);
+  await sleep(400);
+  const tplFields = await evalJs(`(function(){return ['set_print_header_text','set_print_header_sub','set_print_footer_note','set_print_invoice_note','set_print_label_note','set_print_font_size','set_print_density','set_print_show_logo','set_print_show_tax_id','set_print_show_cashier','set_print_preview','set_print_clear_logo'].filter(function(id){return !document.getElementById(id);}).join(',');})()`);
+  check('print template fields present in settings', tplFields === '', 'missing=' + tplFields);
+  await evalJs(`(function(){document.getElementById('set_print_header_text').value='فرع المتجر';document.getElementById('set_print_footer_note').value='شكراً لزيارتكم';document.getElementById('set_print_font_size').value='large';})()`);
+  await evalJs(`document.getElementById('set_print_preview').click()`);
+  await sleep(700);
+  const previewText = await evalJs(`(function(){const ps=document.querySelectorAll('.modal-panel');return ps.length?ps[ps.length-1].innerText:'';})()`);
+  check('print template preview shows header and footer', /فرع المتجر/.test(previewText) && /شكراً لزيارتكم/.test(previewText), previewText.slice(0, 60).replace(/\n/g, ' '));
+  await evalJs(`(function(){const ps=document.querySelectorAll('.modal-backdrop');if(ps.length){const b=ps[ps.length-1].querySelector('[data-close]');if(b)b.click();}})()`);
+  await sleep(500);
+  await evalJs(`document.getElementById('setSave').click()`);
+  await sleep(2500);
+  const savedTpl = await evalJs(`fetch('/api/settings',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.settings)`, true);
+  check('print template saved from UI', savedTpl && savedTpl.print_header_text === 'فرع المتجر' && savedTpl.print_footer_note === 'شكراً لزيارتكم' && savedTpl.print_font_size === 'large', JSON.stringify(savedTpl && { h: savedTpl.print_header_text, f: savedTpl.print_font_size }));
+  await nav(`${BASE}/api/print/thermal/${saleId}?width=80&token=${token}`);
+  const thermalTpl = await evalJs(`document.body.innerText`);
+  check('thermal receipt uses saved template', /فرع المتجر/.test(thermalTpl) && /شكراً لزيارتكم/.test(thermalTpl), thermalTpl.slice(0, 60).replace(/\n/g, ' '));
+  await evalJs(`fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({print_header_text:'',print_footer_note:'',print_font_size:'normal'})})`, true);
+
   phase = 'export-download';
   await nav(BASE);
   await waitFor(`document.querySelectorAll('#nav [data-nav]').length > 0`);

@@ -5,6 +5,7 @@ const statements = require('./statements.routes');
 const accounting = require('./accounting.routes');
 const vouchers = require('./vouchers.routes');
 const currency = require('./currency.routes');
+const tpl = require('../core/print-template');
 
 function invoiceCurrency(invoice, settings) {
   const row = currency.findCurrency(invoice.currency);
@@ -120,8 +121,9 @@ module.exports = {
         )
         .join('');
       const body = `
-        <div class="center"><h2>${esc(settings.company_name || 'Zain')}</h2>
-        <div class="muted">${esc(settings.company_address || '')} ${settings.company_phone ? ' · ' + esc(settings.company_phone) : ''}</div></div>
+        <div class="center">${tpl.logoTag(settings)}<h2>${esc(settings.company_name || 'Zain')}</h2>
+        <div class="muted">${esc(settings.company_address || '')} ${settings.company_phone ? ' · ' + esc(settings.company_phone) : ''}</div>
+        ${tpl.headerExtra(settings)}</div>
         <div class="line"></div>
         <div>رقم: <b>${esc(invoice.invoice_no)}</b></div>
         <div>التاريخ: ${esc(invoice.created_at)}</div>
@@ -140,8 +142,9 @@ module.exports = {
         </table>
         ${invCur.foreign ? `<div class="center muted">المبلغ بالعملة الأساسية: ${money(invoice.total, settings.currency_symbol || 'د.ع')} — سعر الصرف: 1 ${esc(invCur.foreign.code)} = ${invCur.rate} ${esc(settings.base_currency || 'IQD')}</div>` : ''}
         <div class="line"></div>
-        <div class="center muted">${esc(settings.receipt_footer || '')}</div>`;
-      sendText(ctx.res, 200, htmlDoc(invoice.invoice_no, THERMAL_CSS(mm), body), 'text/html; charset=utf-8');
+        <div class="center muted">${esc(settings.receipt_footer || '')}</div>
+        ${tpl.footerExtra(settings)}`;
+      sendText(ctx.res, 200, htmlDoc(invoice.invoice_no, THERMAL_CSS(mm) + tpl.extraCss(settings, false), body), 'text/html; charset=utf-8');
     });
 
     router.get('/api/print/a4/:id', (ctx) => {
@@ -167,12 +170,14 @@ module.exports = {
       const body = `
         <header>
           <div>
+            ${tpl.logoTag(settings, 'print-logo logo-inline')}
             <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
             <div style="font-size:13px;color:#475569;margin-top:6px">
               ${esc(settings.company_address || '')}<br/>
               ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
-              ${settings.company_tax_id ? '<br/>الرقم الضريبي: ' + esc(settings.company_tax_id) : ''}
+              ${tpl.taxIdLine(settings)}
             </div>
+            ${tpl.headerExtra(settings)}
           </div>
           <div class="meta">
             <span class="badge">${invoice.type === 'sale' ? 'فاتورة مبيعات' : invoice.type === 'purchase' ? 'فاتورة مشتريات' : 'فاتورة'}</span><br/><br/>
@@ -180,7 +185,7 @@ module.exports = {
             ${esc(invoice.created_at)}<br/>
             ${invoice.customer_name ? 'العميل: ' + esc(invoice.customer_name) + '<br/>' : ''}
             ${invoice.customer_phone ? 'الهاتف: ' + esc(invoice.customer_phone) + '<br/>' : ''}
-            الكاشير: ${esc(invoice.cashier_name || '-')}
+            ${settings.print_show_cashier === '0' ? '' : 'الكاشير: ' + esc(invoice.cashier_name || '-')}
           </div>
         </header>
         <table class="items">
@@ -197,10 +202,10 @@ module.exports = {
           ${invCur.foreign ? `<div><span>المبلغ بالعملة الأساسية</span><span>${money(invoice.total, settings.currency_symbol || 'د.ع')}</span></div>` : ''}
         </div>
         <footer>
-          <div>${esc(settings.receipt_footer || '')}</div>
+          <div>${esc(settings.receipt_footer || '')}${tpl.footerExtra(settings)}</div>
           <div style="text-align:left">التوقيع: ....................</div>
         </footer>`;
-      sendText(ctx.res, 200, htmlDoc(invoice.invoice_no, css, body), 'text/html; charset=utf-8');
+      sendText(ctx.res, 200, htmlDoc(invoice.invoice_no, css + tpl.extraCss(settings, true), body), 'text/html; charset=utf-8');
     });
 
     router.post('/api/print/labels', (ctx) => {
@@ -245,11 +250,12 @@ module.exports = {
               ${l.sku ? `<div class="sku">${esc(l.sku)}</div>` : ''}
               <div>${code128.svg(l.code, { width: labelW * 3.4, height: 46, moduleWidth: 1, showText: true, color: '#000' })}</div>
               <div class="price">${money(l.price, settings.currency_symbol || 'د.ع')}</div>
+              ${tpl.labelFooter(settings)}
             </div>`
           )
           .join('')}
       `;
-      sendText(ctx.res, 200, htmlDoc('ملصقات الباركود', css, body), 'text/html; charset=utf-8');
+      sendText(ctx.res, 200, htmlDoc('ملصقات الباركود', css + tpl.extraCss(settings, false), body), 'text/html; charset=utf-8');
     });
 
     router.get('/api/print/statement/:kind/:id', (ctx) => {

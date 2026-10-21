@@ -317,6 +317,36 @@ export async function openSettings() {
         ${field('عرض الملصق (mm)', `<input id="set_label_width_mm" type="number" class="field" value="${esc(s.label_width_mm)}" />`)}
         <div class="col-span-2">${field('تذييل الفاتورة', `<input id="set_receipt_footer" class="field" value="${esc(s.receipt_footer)}" />`)}</div>
 
+        <div class="col-span-2 font-black text-zain-700 border-b border-slate-100 pb-2 mt-2">قالب الطباعة</div>
+        ${field('سطر الترويسة', `<input id="set_print_header_text" class="field" value="${esc(s.print_header_text || '')}" placeholder="مثال: فرع الكرادة" />`)}
+        ${field('سطر فرعي', `<input id="set_print_header_sub" class="field" value="${esc(s.print_header_sub || '')}" placeholder="مثال: الدوام 8 صباحاً - 10 مساءً" />`)}
+        ${field('تذييل إضافي', `<input id="set_print_footer_note" class="field" value="${esc(s.print_footer_note || '')}" placeholder="مثال: شكراً لزيارتكم" />`)}
+        ${field('ملاحظة على فاتورة A4', `<input id="set_print_invoice_note" class="field" value="${esc(s.print_invoice_note || '')}" placeholder="مثال: البضاعة لا تُرد بعد 3 أيام" />`)}
+        ${field('تذييل ملصق الباركود', `<input id="set_print_label_note" class="field" value="${esc(s.print_label_note || '')}" />`)}
+        ${field('حجم الخط', `<select id="set_print_font_size" class="field">
+          <option value="small" ${s.print_font_size === 'small' ? 'selected' : ''}>صغير</option>
+          <option value="normal" ${s.print_font_size === 'normal' ? 'selected' : ''}>عادي</option>
+          <option value="large" ${s.print_font_size === 'large' ? 'selected' : ''}>كبير</option>
+        </select>`)}
+        ${field('كثافة السطور', `<select id="set_print_density" class="field">
+          <option value="compact" ${s.print_density === 'compact' ? 'selected' : ''}>مضغوط</option>
+          <option value="normal" ${s.print_density === 'normal' ? 'selected' : ''}>عادي</option>
+          <option value="relaxed" ${s.print_density === 'relaxed' ? 'selected' : ''}>موسّع</option>
+        </select>`)}
+        <div class="col-span-2 flex flex-wrap items-center gap-3">
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_print_show_logo" class="accent-zain-600" ${s.print_show_logo === '1' ? 'checked' : ''} /> إظهار الشعار</label>
+          <label class="btn btn-ghost btn-sm cursor-pointer"><i class="bi bi-image"></i> رفع شعار<input type="file" id="set_print_logo_file" accept="image/*" class="hidden" /></label>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_print_show_tax_id" class="accent-zain-600" ${s.print_show_tax_id === '1' ? 'checked' : ''} /> إظهار الرقم الضريبي</label>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_print_show_cashier" class="accent-zain-600" ${s.print_show_cashier === '1' ? 'checked' : ''} /> إظهار اسم الكاشير</label>
+        </div>
+        <div class="col-span-2 flex items-center gap-3">
+          <div id="logoPreview" class="w-24 h-16 border border-slate-200 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden">
+            ${s.print_logo_data ? `<img src="${esc(s.print_logo_data)}" class="max-h-full max-w-full" />` : '<span class="text-[11px] text-slate-400">لا شعار</span>'}
+          </div>
+          <button type="button" id="set_print_preview" class="btn btn-ghost btn-sm"><i class="bi bi-eye"></i> معاينة القالب</button>
+          <button type="button" id="set_print_clear_logo" class="btn btn-ghost btn-sm text-rose-500"><i class="bi bi-trash3"></i> إزالة الشعار</button>
+        </div>
+
         <div class="col-span-2 font-black text-zain-700 border-b border-slate-100 pb-2 mt-2">المظهر</div>
         ${field('مظهر الواجهة', `<select id="set_theme" class="field">
           <option value="light" ${currentTheme() !== 'dark' ? 'selected' : ''}>فاتح</option>
@@ -346,6 +376,46 @@ export async function openSettings() {
       if (cancel) cancel.addEventListener('click', close);
       const themeSel = wrap.querySelector('#set_theme');
       if (themeSel) themeSel.addEventListener('change', () => applyTheme(themeSel.value));
+      let logoData = s.print_logo_data || '';
+      const logoPreview = wrap.querySelector('#logoPreview');
+      const logoFile = wrap.querySelector('#set_print_logo_file');
+      const clearLogo = wrap.querySelector('#set_print_clear_logo');
+      const previewBtn = wrap.querySelector('#set_print_preview');
+      if (logoFile) logoFile.addEventListener('change', async () => {
+        const f = logoFile.files && logoFile.files[0];
+        if (!f) return;
+        if (f.size > 300000) { toast('حجم الشعار كبير (الحد 300 كيلوبايت)', 'error'); return; }
+        const raw = await readFileBase64(f);
+        logoData = `data:${f.type || 'image/png'};base64,${raw}`;
+        logoPreview.innerHTML = `<img src="${logoData}" class="max-h-full max-w-full" />`;
+        toast('تم تحميل الشعار، احفظ الإعدادات لتطبيقه', 'success');
+      });
+      if (clearLogo) clearLogo.addEventListener('click', () => {
+        logoData = '';
+        logoPreview.innerHTML = '<span class="text-[11px] text-slate-400">لا شعار</span>';
+      });
+      if (previewBtn) previewBtn.addEventListener('click', () => {
+        const head = [];
+        if (logoData) head.push(`<div><img src="${logoData}" style="max-height:40px;max-width:90px;object-fit:contain;display:block;margin:0 auto 4px" /></div>`);
+        head.push(`<h2 style="margin:4px 0;font-size:13px">${esc(s.company_name || 'Zain')}</h2>`);
+        head.push(`<div style="font-size:10px;color:#475569">${esc(s.company_address || '')}</div>`);
+        if (wrap.querySelector('#set_print_header_text').value) head.push(`<div style="font-weight:bold;font-size:12px">${esc(wrap.querySelector('#set_print_header_text').value)}</div>`);
+        if (wrap.querySelector('#set_print_header_sub').value) head.push(`<div style="font-size:10px;color:#475569">${esc(wrap.querySelector('#set_print_header_sub').value)}</div>`);
+        const foot = [];
+        if (s.receipt_footer) foot.push(`<div style="font-size:10px">${esc(s.receipt_footer)}</div>`);
+        if (wrap.querySelector('#set_print_footer_note').value) foot.push(`<div style="font-weight:bold">${esc(wrap.querySelector('#set_print_footer_note').value)}</div>`);
+        if (wrap.querySelector('#set_print_invoice_note').value) foot.push(`<div style="font-size:10px">${esc(wrap.querySelector('#set_print_invoice_note').value)}</div>`);
+        modal({
+          title: 'معاينة قالب الطباعة',
+          size: 'max-w-sm',
+          body: `<div style="text-align:center;border:1px dashed #cbd5e1;border-radius:10px;padding:12px;background:#fff">
+            ${head.join('')}
+            <div style="border-top:1px dashed #000;margin:6px 0"></div>
+            <div style="font-size:11px">${foot.join('')}</div>
+          </div>`,
+          footer: `<button data-close class="btn btn-ghost">إغلاق</button>`,
+        });
+      });
       const save = wrap.querySelector('#setSave');
       if (!save) return;
       save.addEventListener('click', async () => {
@@ -360,6 +430,17 @@ export async function openSettings() {
           printer_type: wrap.querySelector('#set_printer_type').value,
           label_width_mm: wrap.querySelector('#set_label_width_mm').value,
           receipt_footer: wrap.querySelector('#set_receipt_footer').value,
+          print_header_text: wrap.querySelector('#set_print_header_text').value,
+          print_header_sub: wrap.querySelector('#set_print_header_sub').value,
+          print_footer_note: wrap.querySelector('#set_print_footer_note').value,
+          print_invoice_note: wrap.querySelector('#set_print_invoice_note').value,
+          print_label_note: wrap.querySelector('#set_print_label_note').value,
+          print_font_size: wrap.querySelector('#set_print_font_size').value,
+          print_density: wrap.querySelector('#set_print_density').value,
+          print_show_logo: wrap.querySelector('#set_print_show_logo').checked ? 1 : 0,
+          print_logo_data: logoData,
+          print_show_tax_id: wrap.querySelector('#set_print_show_tax_id').checked ? 1 : 0,
+          print_show_cashier: wrap.querySelector('#set_print_show_cashier').checked ? 1 : 0,
           default_pos_mode: wrap.querySelector('#set_default_pos_mode').value,
           credit_limit_mode: wrap.querySelector('#set_credit_limit_mode').value,
           default_tax_rate: wrap.querySelector('#set_default_tax_rate').value,

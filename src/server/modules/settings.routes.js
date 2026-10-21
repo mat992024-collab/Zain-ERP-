@@ -37,7 +37,9 @@ module.exports = {
           if (key === 'ai_enabled' || key === 'low_stock_alert') {
             db.setSetting(key, value ? '1' : '0', 'ai');
           } else {
-            db.setSetting(key, value, 'general');
+            if (typeof value === 'string' && value.length > 600000) throw new HttpError(400, `قيمة الإعداد ${key} كبيرة جداً`);
+            const existing = db.get('SELECT category FROM settings WHERE key = ?', [key]);
+            db.setSetting(key, value, existing ? existing.category : 'general');
           }
         }
       });
