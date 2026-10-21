@@ -301,6 +301,42 @@ async function main() {
   check('expiry report modal opens', expiryOpen === true, expiryText.slice(0, 60).replace(/\n/g, ' '));
   await evalJs(`(function(){const b=document.querySelector('.modal-backdrop [data-close]');if(b)b.click();})()`);
 
+  phase = 'currency';
+  await evalJs(`fetch('/api/currencies',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({code:'USD',name:'دولار أمريكي',symbol:'$',rate:1310,decimals:2})}).then(r=>r.json()).then(d=>d.rows.length)`, true);
+  await evalJs(`location.hash = '#/admin'`);
+  await sleep(1500);
+  const curCard = await evalJs(`(function(){const el=document.getElementById('currencyCard');return el?el.innerText:'';})()`);
+  check('admin shows currencies card', /العملات وأسعار الصرف/.test(curCard) && /USD/.test(curCard), curCard.slice(0, 60).replace(/\n/g, ' '));
+  await evalJs(`document.querySelector('[data-cur-edit="USD"]').click()`);
+  await sleep(600);
+  const curModal = await evalJs(`!!document.getElementById('curSave')`);
+  check('currency edit modal opens', curModal === true);
+  await evalJs(`(function(){const r=document.getElementById('curRate');r.value='1320';r.dispatchEvent(new Event('input'));})()`);
+  await evalJs(`document.getElementById('curSave').click()`);
+  await sleep(1500);
+  const rateUpdated = await evalJs(`fetch('/api/currencies',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows.find(c=>c.code==='USD').rate)`, true);
+  check('currency rate saved from admin UI', Number(rateUpdated) === 1320, 'rate=' + rateUpdated);
+
+  await evalJs(`location.hash = '#/pos'`);
+  await sleep(1800);
+  await evalJs(`document.querySelector('#productGrid [data-id]').click()`);
+  await sleep(400);
+  await evalJs(`document.getElementById('payBtn').click()`);
+  const payCur = await waitFor(`!!document.getElementById('payCurrency')`, 40);
+  check('payment modal offers currency choice', payCur === true);
+  await evalJs(`(function(){const s=document.getElementById('payCurrency');s.value='USD';s.dispatchEvent(new Event('change'));})()`);
+  await sleep(400);
+  const payTotal = await evalJs(`document.getElementById('payTotal').textContent`);
+  const payBaseLine = await evalJs(`document.getElementById('payBaseLine').textContent`);
+  check('foreign currency converts required amount', /\$/.test(payTotal), 'total=' + payTotal);
+  check('foreign currency shows base equivalent', /131|132|يساوي|يعادل/.test(payBaseLine), payBaseLine.slice(0, 60));
+  await evalJs(`(function(){const b=document.querySelector('.modal-backdrop [data-cancel]');if(b)b.click();})()`);
+  await sleep(300);
+  await evalJs(`document.getElementById('clearCart').click()`);
+  await sleep(400);
+  await evalJs(`(function(){const b=document.querySelector('.modal-backdrop [data-yes]');if(b)b.click();})()`);
+  await sleep(300);
+
   phase = 'statement';
   await evalJs(`location.hash = '#/customers'`);
   await sleep(1500);

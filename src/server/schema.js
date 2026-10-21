@@ -112,6 +112,10 @@ CREATE TABLE IF NOT EXISTS invoices (
   due REAL NOT NULL DEFAULT 0,
   payment_method TEXT NOT NULL DEFAULT 'cash',
   status TEXT NOT NULL DEFAULT 'completed',
+  currency TEXT,
+  exchange_rate REAL NOT NULL DEFAULT 1,
+  total_original REAL,
+  paid_original REAL,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
@@ -141,6 +145,9 @@ CREATE TABLE IF NOT EXISTS expenses (
   description TEXT,
   amount REAL NOT NULL DEFAULT 0,
   payment_method TEXT NOT NULL DEFAULT 'cash',
+  currency TEXT,
+  exchange_rate REAL NOT NULL DEFAULT 1,
+  amount_original REAL,
   user_id INTEGER,
   shift_id INTEGER,
   date TEXT NOT NULL DEFAULT (date('now','localtime')),
@@ -273,6 +280,17 @@ CREATE TABLE IF NOT EXISTS activity_log (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS currencies (
+  code TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  symbol TEXT NOT NULL DEFAULT '',
+  rate REAL NOT NULL DEFAULT 1,
+  decimals INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  is_base INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS vouchers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   voucher_no TEXT NOT NULL UNIQUE,
@@ -284,6 +302,9 @@ CREATE TABLE IF NOT EXISTS vouchers (
   from_account TEXT,
   to_account TEXT,
   method TEXT NOT NULL DEFAULT 'cash',
+  currency TEXT,
+  exchange_rate REAL NOT NULL DEFAULT 1,
+  amount_original REAL,
   description TEXT,
   user_id INTEGER,
   shift_id INTEGER,
@@ -310,6 +331,7 @@ const DEFAULT_SETTINGS = [
   ["company_tax_id", "", "general"],
   ["currency", "IQD", "general"],
   ["currency_symbol", "د.ع", "general"],
+  ["base_currency", "IQD", "financial"],
   ["industry", "supermarket", "general"],
   ["language", "ar", "general"],
   ["theme", "zain", "appearance"],

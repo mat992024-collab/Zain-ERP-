@@ -6,9 +6,21 @@ let products = [];
 let customers = [];
 let quick = [];
 let lowStock = [];
+let currencies = [];
 let scanBuffer = '';
 let scanTimer = null;
 let lastKeyTime = 0;
+
+function roundTo(value, decimals) {
+  const factor = 10 ** Math.min(Math.max(Number(decimals) || 0, 0), 4);
+  return Math.round((Number(value) || 0) * factor) / factor;
+}
+
+async function loadCurrencies() {
+  const r = await api('GET', '/api/currencies').catch(() => null);
+  currencies = r ? (r.rows || []).filter((c) => c.is_active) : [];
+  return currencies;
+}
 
 export async function render(c) {
   state.cart = [];
@@ -460,14 +472,22 @@ async function refreshProducts() {
 function openPayment() {
   if (!state.cart.length) { toast('السلة فارغة', 'error'); return; }
   const t = totals();
+  loadCurrencies().then(() => openPaymentModal(t));
+}
+
+function openPaymentModal(t) {
+  const base = currencies.find((c) => c.is_base) || { code: 'IQD', symbol: state.settings.currency_symbol || 'د.ع', rate: 1, decimals: 0 };
+  const hasForeign = currencies.some((c) => !c.is_base);
   modal({
     title: 'إتمام عملية البيع',
     size: 'max-w-md',
     body: `
       <div class="bg-zain-50 rounded-xl p-4 text-center mb-4">
         <div class="text-xs text-zain-600 font-bold">المبلغ المطلوب</div>
-        <div class="text-3xl font-black text-zain-700">${money(t.total)}</div>
+        <div class="text-3xl font-black text-zain-700" id="payTotal">${money(t.total)}</div>
+        <div class="text-[11px] text-slate-500 mt-1" id="payBaseLine"></div>
       </div>
+      ${hasForeign ? field('عملة الدفع', `<select id="payCurrency" class="field">${currencies.map((c) => `<option value="${esc(c.code)}" ${c.is_base ? 'selected' : ''}>${esc(c.code)} — ${esc(c.name)} (${esc(c.symbol || c.code)})</option>`).join('')}</select>`) : ''}
       <div class="mb-3">
         <label class="label">طريقة الدفع</label>
         <div class="grid grid-cols-3 gap-2">
@@ -483,34 +503,60 @@ function openPayment() {
       let method = 'cash';
       const amount = wrap.querySelector('#payAmount');
       const changeBox = wrap.querySelector('#changeBox');
+      const curSel = wrap.querySelector('#payCurrency');
+      const totalBox = wrap.querySelector('#payTotal');
+      const baseLine = wrap.querySelector('#payBaseLine');
+      const curOf = () => currencies.find((c) => c.code === (curSel ? curSel.value : base.code)) || base;
+      const isForeign = () => !curOf().is_base;
+      const totalIn = () => {
+        const c = curOf();
+        return isForeign() ? roundTo(t.total / (Number(c.rate) || 1), c.decimals) : t.total;
+      };
+      const symbolOf = () => {
+        const c = curOf();
+        return isForeign() ? (c.symbol || c.code) : (state.settings.currency_symbol || 'د.ع');
+      };
       const update = () => {
+        const cur = curOf();
+        const totalF = totalIn();
+        totalBox.textContent = money(totalF, symbolOf());
+        baseLine.textContent = isForeign() ? `يعادل ${money(t.total)} بسعر 1 ${esc(cur.code)} = ${Number(cur.rate) || 1} ${esc(base.code)}` : '';
         const paid = Number(amount.value) || 0;
-        changeBox.innerHTML = paid >= t.total
-          ? `<span class="text-emerald-600 font-bold">المتبقي للعميل: ${money(paid - t.total)}</span>`
-          : `<span class="text-amber-600 font-bold">الباقي على العميل: ${money(t.total - paid)}</span>`;
+        changeBox.innerHTML = paid >= totalF
+          ? `<span class="text-emerald-600 font-bold">المتبقي للعميل: ${money(paid - totalF, symbolOf())}</span>`
+          : `<span class="text-amber-600 font-bold">الباقي على العميل: ${money(totalF - paid, symbolOf())}</span>`;
       };
       amount.addEventListener('input', update);
+      if (curSel) {
+        curSel.addEventListener('change', () => {
+          amount.value = method === 'credit' ? 0 : totalIn();
+          update();
+        });
+      }
       update();
       wrap.querySelectorAll('.pm-btn').forEach((b) => b.addEventListener('click', () => {
         method = b.dataset.pm;
         wrap.querySelectorAll('.pm-btn').forEach((x) => { x.className = 'pm-btn btn btn-ghost'; });
         b.className = 'pm-btn btn btn-primary';
         if (method === 'credit') amount.value = 0;
-        else amount.value = t.total;
+        else amount.value = totalIn();
         update();
       }));
       wrap.querySelector('[data-cancel]').addEventListener('click', close);
       wrap.querySelector('#confirmPay').addEventListener('click', async () => {
-        const paid = Number(amount.value) || 0;
+        const paidForeign = Number(amount.value) || 0;
+        const cur = curOf();
+        const rate = Number(cur.rate) || 1;
+        const paidBase = isForeign() ? roundTo(paidForeign * rate, 4) : paidForeign;
         try {
-          const res = await submitSale(method, paid, false);
+          const res = await submitSale(method, paidBase, false, cur.code, paidForeign);
           close();
           await afterSale(res);
         } catch (err) {
           if (err.code === 'CREDIT_LIMIT') {
             creditLimitWarning(err.details || {}, async () => {
               try {
-                const res = await submitSale(method, paid, true);
+                const res = await submitSale(method, paidBase, true, cur.code, paidForeign);
                 close();
                 await afterSale(res);
               } catch (e2) { toast(e2.message, 'error'); }
@@ -524,13 +570,15 @@ function openPayment() {
   });
 }
 
-function submitSale(method, paid, force) {
+function submitSale(method, paid, force, currencyCode, paidOriginal) {
   return api('POST', '/api/sales', {
     items: state.cart.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_price: i.unit_price, discount: i.discount })),
     customer_id: state.cartMeta.customer_id || null,
     pos_mode: state.cartMeta.pos_mode,
     payment_method: method,
     paid,
+    paid_original: paidOriginal === undefined ? null : paidOriginal,
+    currency: currencyCode || null,
     discount: Number(state.cartMeta.discount) || 0,
     tax: Number(state.cartMeta.tax) || 0,
     shift_id: state.shift ? state.shift.id : null,

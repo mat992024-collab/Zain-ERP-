@@ -1,9 +1,10 @@
 const db = require('../db');
 const { sendJson, HttpError } = require('../core/http');
 const ledger = require('../core/ledger');
+const currency = require('./currency.routes');
 const { pick, buildInsert, buildUpdate, list } = require('../core/crud');
 
-const EXPENSE_FIELDS = ['category', 'description', 'amount', 'payment_method', 'date'];
+const EXPENSE_FIELDS = ['category', 'description', 'amount', 'payment_method', 'date', 'currency', 'exchange_rate', 'amount_original'];
 const ACCOUNT_FIELDS = ['code', 'name', 'type', 'parent_id'];
 
 function buildIncomeStatement(query = {}) {
@@ -182,9 +183,15 @@ module.exports = {
 
     router.post('/api/expenses', (ctx) => {
       if (!ctx.can('accounting.write')) throw new HttpError(403, 'لا تملك صلاحية الإضافة');
-      const data = pick(ctx.body || {}, EXPENSE_FIELDS);
+      const body = ctx.body || {};
+      const data = pick(body, EXPENSE_FIELDS);
+      const cur = currency.currencyOf(body.currency);
+      const rate = Number(cur.rate) || 1;
       data.amount = Number(data.amount) || 0;
       if (!data.amount) throw new HttpError(400, 'المبلغ مطلوب');
+      data.currency = cur.code;
+      data.exchange_rate = rate;
+      data.amount_original = cur.is_base ? data.amount : currency.roundTo(data.amount / rate, cur.decimals);
       data.user_id = ctx.user.id;
       const { sql, values } = buildInsert('expenses', data);
       let id;

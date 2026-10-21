@@ -288,6 +288,56 @@ const { start } = require('../src/server/index.js');
   r = await call('GET', '/api/print/z-report', null, token);
   ok('z-report print HTML', r.status === 200 && String(r.data).includes('تقرير Z'), String(r.status));
 
+  r = await call('GET', '/api/currencies', null, token);
+  ok('currencies list', r.status === 200 && r.data.rows.length >= 1 && r.data.base.code === 'IQD', JSON.stringify(r.data.base));
+  r = await call('POST', '/api/currencies', { code: 'usd', name: 'دولار أمريكي', symbol: '$', rate: 1300, decimals: 2 }, token);
+  ok('create currency', r.status === 201 && r.data.rows.some((c) => c.code === 'USD'), JSON.stringify(r.data.rows.map((c) => c.code)));
+  r = await call('POST', '/api/currencies', { code: 'USD', name: 'مكرر', rate: 1 }, token);
+  ok('duplicate currency rejected (400)', r.status === 400, String(r.status));
+  r = await call('POST', '/api/currencies', { code: 'EUR', name: 'يورو', rate: 0 }, token);
+  ok('invalid rate rejected (400)', r.status === 400, String(r.status));
+  r = await call('POST', '/api/currencies', { code: 'EUR', name: 'يورو', rate: 1500 }, cashierToken);
+  ok('cashier cannot create currency (403)', r.status === 403, String(r.status));
+  r = await call('PUT', '/api/currencies/USD', { rate: 1310, name: 'دولار أمريكي', symbol: '$' }, token);
+  ok('update currency rate', r.status === 200 && r.data.rows.find((c) => c.code === 'USD').rate === 1310, JSON.stringify(r.data.rows.find((c) => c.code === 'USD')));
+  r = await call('GET', '/api/currencies/convert?amount=100&to=USD', null, token);
+  ok('convert endpoint', r.status === 200 && r.data.base_amount === 131000, JSON.stringify(r.data));
+
+  r = await call('POST', '/api/products', { name: 'صنف بالدولار', category: 'عام', sale_price: 131000, cost_price: 100000, quantity: 10, unit: 'قطعة' }, token);
+  const usdProductId = r.data.product.id;
+  ok('product for foreign sale created', r.status === 201, String(r.status));
+  r = await call('POST', '/api/sales', {
+    items: [{ product_id: usdProductId, qty: 1, unit_price: 131000 }],
+    payment_method: 'cash',
+    currency: 'USD',
+    paid_original: 100,
+  }, token);
+  const usdInvoiceId = r.data.invoice && r.data.invoice.id;
+  ok('sale in foreign currency', r.status === 201 && r.data.invoice.currency === 'USD', JSON.stringify(r.data.invoice && { c: r.data.invoice.currency, t: r.data.invoice.total }));
+  ok('foreign sale total stored in base', Math.abs(Number(r.data.invoice.total) - 131000) < 0.01, String(r.data.invoice.total));
+  ok('foreign sale original total', Math.abs(Number(r.data.invoice.total_original) - 100) < 0.01, String(r.data.invoice.total_original));
+  ok('foreign sale paid in base', Math.abs(Number(r.data.invoice.paid) - 131000) < 0.01, String(r.data.invoice.paid));
+  ok('foreign sale due zero', Math.abs(Number(r.data.invoice.due)) < 0.01, String(r.data.invoice.due));
+  r = await call('GET', '/api/treasury', null, token);
+  const foreignTreasury = r.data.rows.find((t) => t.ref_table === 'invoices' && t.ref_id === usdInvoiceId);
+  ok('foreign sale treasury in base currency', foreignTreasury && Math.abs(Number(foreignTreasury.amount) - 131000) < 0.01, JSON.stringify(foreignTreasury && foreignTreasury.amount));
+  r = await call('GET', `/api/print/thermal/${usdInvoiceId}`, null, token);
+  ok('foreign receipt shows currency rate', r.status === 200 && String(r.data).includes('USD'), String(r.status));
+  r = await call('GET', '/api/reports/currency', null, token);
+  ok('currency report', r.status === 200 && r.data.sales.some((s) => s.code === 'USD' && Math.abs(s.total_original - 100) < 0.01), JSON.stringify(r.data.sales));
+  r = await call('GET', '/api/reports/trial-balance', null, token);
+  ok('trial balance still balanced with foreign sale', Math.abs(r.data.totals.debit - r.data.totals.credit) < 0.01, `${r.data.totals.debit} / ${r.data.totals.credit}`);
+  r = await call('POST', '/api/expenses', { category: 'نقل', description: 'أجرة', amount: 131000, currency: 'USD' }, token);
+  ok('expense in foreign currency', r.status === 201 && r.data.expense.currency === 'USD' && Math.abs(Number(r.data.expense.amount_original) - 100) < 0.01, JSON.stringify(r.data.expense && { c: r.data.expense.currency, o: r.data.expense.amount_original }));
+  r = await call('DELETE', `/api/currencies/USD`, null, token);
+  ok('delete currency in use rejected (400)', r.status === 400, String(r.status));
+  r = await call('POST', '/api/currencies', { code: 'EUR', name: 'يورو', symbol: '€', rate: 1500, decimals: 2 }, token);
+  ok('second currency created', r.status === 201, String(r.status));
+  r = await call('DELETE', '/api/currencies/EUR', null, token);
+  ok('unused currency deleted', r.status === 200 && !r.data.rows.some((c) => c.code === 'EUR'), JSON.stringify(r.data.rows.map((c) => c.code)));
+  r = await call('DELETE', '/api/currencies/IQD', null, token);
+  ok('base currency cannot be deleted (400)', r.status === 400, String(r.status));
+
   r = await call('GET', '/api/backup', null, token);
   ok('backup list', r.status === 200 && Array.isArray(r.data.backups), r.status);
   r = await call('POST', '/api/backup', null, token);

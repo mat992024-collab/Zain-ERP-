@@ -1,6 +1,7 @@
 const db = require('../db');
 const { sendJson, HttpError } = require('../core/http');
 const ledger = require('../core/ledger');
+const currency = require('./currency.routes');
 
 const PREFIX = { receipt: 'RCV', payout: 'PAY', transfer: 'TRF' };
 const TYPE_LABEL = { receipt: 'سند قبض', payout: 'سند صرف', transfer: 'سند نقل' };
@@ -25,23 +26,25 @@ function partnerRow(partnerType, partnerId) {
 }
 
 function insertVoucher(data) {
-  const sql = `INSERT INTO vouchers (voucher_no, type, amount, partner_type, partner_id, partner_name, from_account, to_account, method, description, user_id, shift_id, date)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  const sql = `INSERT INTO vouchers (voucher_no, type, amount, partner_type, partner_id, partner_name, from_account, to_account, method, currency, exchange_rate, amount_original, description, user_id, shift_id, date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   const res = db.run(sql, [
     data.voucher_no, data.type, data.amount, data.partner_type, data.partner_id, data.partner_name,
-    data.from_account, data.to_account, data.method, data.description, data.user_id, data.shift_id, data.date,
+    data.from_account, data.to_account, data.method, data.currency, data.exchange_rate, data.amount_original,
+    data.description, data.user_id, data.shift_id, data.date,
   ]);
   return Number(res.lastInsertRowid);
 }
 
-function postReceipt({ amount, partner, method, description, userId, shiftId, date }) {
+function postReceipt({ amount, partner, method, description, userId, shiftId, date, currencyCode, exchangeRate, amountOriginal }) {
   let voucherId;
   db.tx(() => {
     voucherId = insertVoucher({
       voucher_no: nextVoucherNo('receipt'), type: 'receipt', amount,
       partner_type: partner ? partner.type : null, partner_id: partner ? partner.id : null,
       partner_name: partner ? partner.name : null, from_account: null, to_account: '1100',
-      method, description, user_id: userId, shift_id: shiftId, date,
+      method, currency: currencyCode, exchange_rate: exchangeRate, amount_original: amountOriginal,
+      description, user_id: userId, shift_id: shiftId, date,
     });
     if (partner) {
       if (partner.type === 'supplier') db.run('UPDATE suppliers SET balance = balance - ? WHERE id = ?', [amount, partner.id]);
@@ -57,14 +60,15 @@ function postReceipt({ amount, partner, method, description, userId, shiftId, da
   return voucherId;
 }
 
-function postPayout({ amount, partner, method, description, userId, shiftId, date }) {
+function postPayout({ amount, partner, method, description, userId, shiftId, date, currencyCode, exchangeRate, amountOriginal }) {
   let voucherId;
   db.tx(() => {
     voucherId = insertVoucher({
       voucher_no: nextVoucherNo('payout'), type: 'payout', amount,
       partner_type: partner ? partner.type : null, partner_id: partner ? partner.id : null,
       partner_name: partner ? partner.name : null, from_account: '1100', to_account: null,
-      method, description, user_id: userId, shift_id: shiftId, date,
+      method, currency: currencyCode, exchange_rate: exchangeRate, amount_original: amountOriginal,
+      description, user_id: userId, shift_id: shiftId, date,
     });
     if (partner) {
       if (partner.type === 'supplier') db.run('UPDATE suppliers SET balance = balance + ? WHERE id = ?', [amount, partner.id]);
@@ -80,13 +84,14 @@ function postPayout({ amount, partner, method, description, userId, shiftId, dat
   return voucherId;
 }
 
-function postTransfer({ amount, fromAccount, toAccount, description, userId, shiftId, date }) {
+function postTransfer({ amount, fromAccount, toAccount, description, userId, shiftId, date, currencyCode, exchangeRate, amountOriginal }) {
   let voucherId;
   db.tx(() => {
     voucherId = insertVoucher({
       voucher_no: nextVoucherNo('transfer'), type: 'transfer', amount,
       partner_type: null, partner_id: null, partner_name: null,
       from_account: fromAccount, to_account: toAccount, method: 'transfer',
+      currency: currencyCode, exchange_rate: exchangeRate, amount_original: amountOriginal,
       description, user_id: userId, shift_id: shiftId, date,
     });
     if (fromAccount === '1100') {
@@ -280,6 +285,9 @@ module.exports = {
       const amount = Number(body.amount);
       if (!amount || amount <= 0) throw new HttpError(400, 'المبلغ غير صحيح');
       const date = body.date || db.get("SELECT date('now','localtime') AS d").d;
+      const cur = currency.currencyOf(body.currency);
+      const rate = Number(cur.rate) || 1;
+      const amountOriginal = cur.is_base ? amount : currency.roundTo(amount / rate, cur.decimals);
       const shift = db.get(`SELECT id FROM shifts WHERE status='open' AND user_id = ? ORDER BY id DESC LIMIT 1`, [ctx.user.id]);
       const shiftId = shift ? shift.id : null;
       let voucherId;
@@ -292,7 +300,7 @@ module.exports = {
         const to = db.get('SELECT code FROM accounts WHERE code = ?', [toAccount]);
         if (!from) throw new HttpError(400, 'حساب المصدر غير موجود');
         if (!to) throw new HttpError(400, 'حساب الوجهة غير موجود');
-        voucherId = postTransfer({ amount, fromAccount, toAccount, description: body.description, userId: ctx.user.id, shiftId, date });
+        voucherId = postTransfer({ amount, fromAccount, toAccount, description: body.description, userId: ctx.user.id, shiftId, date, currencyCode: cur.code, exchangeRate: rate, amountOriginal });
       } else {
         const partnerType = body.partner_type === 'supplier' ? 'supplier' : (body.partner_type === 'customer' ? 'customer' : null);
         let partner = null;
@@ -302,9 +310,9 @@ module.exports = {
           partner = { ...found, type: partnerType };
         }
         if (type === 'receipt') {
-          voucherId = postReceipt({ amount, partner, method: body.method || 'cash', description: body.description, userId: ctx.user.id, shiftId, date });
+          voucherId = postReceipt({ amount, partner, method: body.method || 'cash', description: body.description, userId: ctx.user.id, shiftId, date, currencyCode: cur.code, exchangeRate: rate, amountOriginal });
         } else {
-          voucherId = postPayout({ amount, partner, method: body.method || 'cash', description: body.description, userId: ctx.user.id, shiftId, date });
+          voucherId = postPayout({ amount, partner, method: body.method || 'cash', description: body.description, userId: ctx.user.id, shiftId, date, currencyCode: cur.code, exchangeRate: rate, amountOriginal });
         }
       }
       db.logActivity(ctx.user.id, 'create', 'vouchers', voucherId, { type, amount });

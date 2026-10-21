@@ -46,6 +46,16 @@ function migrate() {
   ensure('settings', 'category', "category TEXT NOT NULL DEFAULT 'general'");
   ensure('products', 'units', "units TEXT NOT NULL DEFAULT '[]'");
   ensure('users', 'permissions', "permissions TEXT NOT NULL DEFAULT '[]'");
+  ensure('invoices', 'currency', 'currency TEXT');
+  ensure('invoices', 'exchange_rate', 'exchange_rate REAL NOT NULL DEFAULT 1');
+  ensure('invoices', 'total_original', 'total_original REAL');
+  ensure('invoices', 'paid_original', 'paid_original REAL');
+  ensure('expenses', 'currency', 'currency TEXT');
+  ensure('expenses', 'exchange_rate', 'exchange_rate REAL NOT NULL DEFAULT 1');
+  ensure('expenses', 'amount_original', 'amount_original REAL');
+  ensure('vouchers', 'currency', 'currency TEXT');
+  ensure('vouchers', 'exchange_rate', 'exchange_rate REAL NOT NULL DEFAULT 1');
+  ensure('vouchers', 'amount_original', 'amount_original REAL');
 }
 
 function bootstrap() {
@@ -74,6 +84,17 @@ function bootstrap() {
       const res = insert.run(code, name, type, parentId, isSystem);
       byCode[code] = Number(res.lastInsertRowid);
     }
+  }
+
+  const baseCode = getSetting('base_currency', 'IQD');
+  const baseSymbol = getSetting('currency_symbol', 'د.ع');
+  const baseExists = db.prepare('SELECT code FROM currencies WHERE code = ?').get(baseCode);
+  if (!baseExists) {
+    db.prepare(
+      'INSERT INTO currencies (code, name, symbol, rate, decimals, is_active, is_base) VALUES (?, ?, ?, 1, 0, 1, 1)'
+    ).run(baseCode, 'العملة الأساسية', baseSymbol);
+  } else {
+    db.prepare('UPDATE currencies SET is_base = 1, is_active = 1 WHERE code = ?').run(baseCode);
   }
 }
 

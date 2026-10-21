@@ -4,6 +4,20 @@ const code128 = require('../core/code128');
 const statements = require('./statements.routes');
 const accounting = require('./accounting.routes');
 const vouchers = require('./vouchers.routes');
+const currency = require('./currency.routes');
+
+function invoiceCurrency(invoice, settings) {
+  const row = currency.findCurrency(invoice.currency);
+  const foreign = row && !row.is_base ? row : null;
+  const rate = foreign ? Number(foreign.rate) || 1 : 1;
+  const symbol = foreign ? (foreign.symbol || foreign.code) : (settings.currency_symbol || 'د.ع');
+  return {
+    foreign,
+    rate,
+    symbol,
+    convert: (v) => (foreign ? currency.roundTo((Number(v) || 0) / rate, foreign.decimals) : Number(v) || 0),
+  };
+}
 
 function esc(str = '') {
   return String(str)
@@ -95,12 +109,13 @@ module.exports = {
       if (!data) return sendText(ctx.res, 404, 'Not found', 'text/plain; charset=utf-8');
       const mm = ctx.query.width === '58' ? 58 : 80;
       const { invoice, items, settings } = data;
-      const cur = settings.currency_symbol || 'د.ع';
+      const invCur = invoiceCurrency(invoice, settings);
+      const cur = invCur.symbol;
       const rows = items
         .map(
           (i) => `<tr>
-            <td class="col-item">${esc(i.name)}<br/><span class="muted">${i.qty} × ${money(i.unit_price, '')}</span></td>
-            <td class="col-price">${money(i.total, '')}</td>
+            <td class="col-item">${esc(i.name)}<br/><span class="muted">${i.qty} × ${money(invCur.convert(i.unit_price), '')}</span></td>
+            <td class="col-price">${money(invCur.convert(i.total), '')}</td>
           </tr>`
         )
         .join('');
@@ -116,13 +131,14 @@ module.exports = {
         <table><thead><tr><th class="col-item">الصنف</th><th class="col-price">المبلغ</th></tr></thead><tbody>${rows}</tbody></table>
         <div class="line"></div>
         <table>
-          <tr><td>الإجمالي الفرعي</td><td class="col-price">${money(invoice.subtotal, cur)}</td></tr>
-          ${Number(invoice.discount) ? `<tr><td>الخصم</td><td class="col-price">-${money(invoice.discount, cur)}</td></tr>` : ''}
-          ${Number(invoice.tax) ? `<tr><td>الضريبة</td><td class="col-price">${money(invoice.tax, cur)}</td></tr>` : ''}
-          <tr class="total-row"><td>المجموع</td><td class="col-price">${money(invoice.total, cur)}</td></tr>
-          <tr><td>مدفوع (${esc(invoice.payment_method)})</td><td class="col-price">${money(invoice.paid, cur)}</td></tr>
-          ${Number(invoice.due) ? `<tr><td>متبقي</td><td class="col-price">${money(invoice.due, cur)}</td></tr>` : ''}
+          <tr><td>الإجمالي الفرعي</td><td class="col-price">${money(invCur.convert(invoice.subtotal), cur)}</td></tr>
+          ${Number(invoice.discount) ? `<tr><td>الخصم</td><td class="col-price">-${money(invCur.convert(invoice.discount), cur)}</td></tr>` : ''}
+          ${Number(invoice.tax) ? `<tr><td>الضريبة</td><td class="col-price">${money(invCur.convert(invoice.tax), cur)}</td></tr>` : ''}
+          <tr class="total-row"><td>المجموع</td><td class="col-price">${money(invCur.convert(invoice.total), cur)}</td></tr>
+          <tr><td>مدفوع (${esc(invoice.payment_method)})</td><td class="col-price">${money(invCur.convert(invoice.paid), cur)}</td></tr>
+          ${Number(invoice.due) ? `<tr><td>متبقي</td><td class="col-price">${money(invCur.convert(invoice.due), cur)}</td></tr>` : ''}
         </table>
+        ${invCur.foreign ? `<div class="center muted">المبلغ بالعملة الأساسية: ${money(invoice.total, settings.currency_symbol || 'د.ع')} — سعر الصرف: 1 ${esc(invCur.foreign.code)} = ${invCur.rate} ${esc(settings.base_currency || 'IQD')}</div>` : ''}
         <div class="line"></div>
         <div class="center muted">${esc(settings.receipt_footer || '')}</div>`;
       sendText(ctx.res, 200, htmlDoc(invoice.invoice_no, THERMAL_CSS(mm), body), 'text/html; charset=utf-8');
@@ -132,7 +148,8 @@ module.exports = {
       const data = fetchInvoice(ctx.params.id);
       if (!data) return sendText(ctx.res, 404, 'Not found', 'text/plain; charset=utf-8');
       const { invoice, items, settings } = data;
-      const cur = settings.currency_symbol || 'د.ع';
+      const invCur = invoiceCurrency(invoice, settings);
+      const cur = invCur.symbol;
       const rows = items
         .map(
           (i, idx) => `<tr>
@@ -140,9 +157,9 @@ module.exports = {
             <td>${esc(i.name)}</td>
             <td style="text-align:center">${esc(i.unit || 'قطعة')}</td>
             <td style="text-align:center">${i.qty}</td>
-            <td style="text-align:left">${money(i.unit_price, '')}</td>
-            <td style="text-align:left">${money(i.discount, '')}</td>
-            <td style="text-align:left">${money(i.total, '')}</td>
+            <td style="text-align:left">${money(invCur.convert(i.unit_price), '')}</td>
+            <td style="text-align:left">${money(invCur.convert(i.discount), '')}</td>
+            <td style="text-align:left">${money(invCur.convert(i.total), '')}</td>
           </tr>`
         )
         .join('');
@@ -171,12 +188,13 @@ module.exports = {
           <tbody>${rows}</tbody>
         </table>
         <div class="totals">
-          <div><span>الإجمالي الفرعي</span><span>${money(invoice.subtotal, cur)}</span></div>
-          <div><span>الخصم</span><span>${money(invoice.discount, cur)}</span></div>
-          <div><span>الضريبة</span><span>${money(invoice.tax, cur)}</span></div>
-          <div class="grand"><span>المجموع</span><span>${money(invoice.total, cur)}</span></div>
-          <div><span>مدفوع</span><span>${money(invoice.paid, cur)}</span></div>
-          <div><span>المتبقي</span><span>${money(invoice.due, cur)}</span></div>
+          <div><span>الإجمالي الفرعي</span><span>${money(invCur.convert(invoice.subtotal), cur)}</span></div>
+          <div><span>الخصم</span><span>${money(invCur.convert(invoice.discount), cur)}</span></div>
+          <div><span>الضريبة</span><span>${money(invCur.convert(invoice.tax), cur)}</span></div>
+          <div class="grand"><span>المجموع</span><span>${money(invCur.convert(invoice.total), cur)}</span></div>
+          <div><span>مدفوع</span><span>${money(invCur.convert(invoice.paid), cur)}</span></div>
+          <div><span>المتبقي</span><span>${money(invCur.convert(invoice.due), cur)}</span></div>
+          ${invCur.foreign ? `<div><span>المبلغ بالعملة الأساسية</span><span>${money(invoice.total, settings.currency_symbol || 'د.ع')}</span></div>` : ''}
         </div>
         <footer>
           <div>${esc(settings.receipt_footer || '')}</div>

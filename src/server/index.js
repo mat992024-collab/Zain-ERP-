@@ -10,6 +10,7 @@ const WEB_DIR = path.join(__dirname, '..', 'web');
 const MODULES = [
   require('./modules/settings.routes'),
   require('./modules/auth.routes'),
+  require('./modules/currency.routes'),
   require('./modules/products.routes'),
   require('./modules/partners.routes'),
   require('./modules/customers.routes'),

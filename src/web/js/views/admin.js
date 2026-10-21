@@ -22,7 +22,9 @@ export async function renderAdmin(c) {
   const data = await api('GET', '/api/users');
   const canManage = hasPerm('admin.users');
   const canBackup = hasPerm('backup.manage');
+  const canSettings = hasPerm('settings.write');
   const backup = canBackup ? await api('GET', '/api/backup').catch(() => ({ backups: [], db_size: 0 })) : { backups: [], db_size: 0 };
+  const currencyData = canSettings ? await api('GET', '/api/currencies').catch(() => ({ rows: [], base: null })) : { rows: [], base: null };
 
   c.innerHTML = `
     <div class="card">
@@ -46,11 +48,22 @@ export async function renderAdmin(c) {
         </tr>`).join('')}</tbody>
       </table></div>
     </div>
+    ${canSettings ? currencyCard(currencyData) : ''}
     <div class="card p-4">
       <div class="font-black mb-2"><i class="bi bi-info-circle text-zain-600"></i> ملاحظة</div>
       <p class="text-sm text-slate-500">دور "مدير النظام" يمتلك جميع الصلاحيات تلقائياً. للأدوار الأخرى حدّد الصلاحيات المطلوبة من نموذج التعديل.</p>
     </div>
     ${canBackup ? backupCard(backup) : ''}`;
+
+  const curAdd = c.querySelector('#curAdd');
+  if (curAdd) curAdd.addEventListener('click', () => currencyForm(null, currencyData));
+  c.querySelectorAll('[data-cur-edit]').forEach((b) => b.addEventListener('click', () => currencyForm(currencyData.rows.find((x) => x.code === b.dataset.curEdit), currencyData)));
+  c.querySelectorAll('[data-cur-del]').forEach((b) => b.addEventListener('click', async () => {
+    const code = b.dataset.curDel;
+    if (!(await confirmBox(`حذف العملة ${code}؟`))) return;
+    try { await api('DELETE', `/api/currencies/${encodeURIComponent(code)}`); toast('تم الحذف', 'success'); renderAdmin(c); }
+    catch (e) { toast(e.message, 'error'); }
+  }));
 
   const addBtn = c.querySelector('#uAdd');
   if (addBtn) addBtn.addEventListener('click', () => userForm(null));
@@ -97,6 +110,73 @@ export async function renderAdmin(c) {
     } catch (e) { toast(e.message, 'error'); }
     uploadInput.value = '';
   });
+
+  function currencyCard(data) {
+    const rows = data.rows || [];
+    const base = data.base || rows.find((r) => r.is_base) || null;
+    return `
+      <div class="card mt-4" id="currencyCard">
+        <div class="p-4 flex justify-between items-center border-b border-slate-100">
+          <div class="font-black flex items-center gap-2"><i class="bi bi-currency-exchange text-zain-600"></i> العملات وأسعار الصرف</div>
+          <button id="curAdd" class="btn btn-primary"><i class="bi bi-plus-lg"></i> عملة جديدة</button>
+        </div>
+        <div class="p-4">
+          <p class="text-xs text-slate-500 mb-3">الحسابات والتقارير تحتفظ دائماً بالمبالغ بالعملة الأساسية، وتُسجَّل الفواتير والمصروفات والسندات مع عملتها الأصلية وسعر صرفها. العملة الأساسية الحالية: <span class="font-bold text-zain-700">${esc(base ? base.code : '-')}</span></p>
+          <div class="overflow-auto max-h-64"><table class="w-full">
+            <thead><tr><th class="th">الرمز</th><th class="th">الاسم</th><th class="th">الرمز المختصر</th><th class="th">سعر الصرف (1 وحدة = ؟ بالأساسية)</th><th class="th">الخانات</th><th class="th">الحالة</th><th class="th"></th></tr></thead>
+            <tbody>${rows.map((x) => `<tr class="tr">
+              <td class="td font-mono text-xs font-bold">${esc(x.code)}</td>
+              <td class="td font-bold">${esc(x.name)}</td>
+              <td class="td">${esc(x.symbol || '-')}</td>
+              <td class="td font-mono">${x.is_base ? '1' : x.rate}</td>
+              <td class="td text-xs">${x.decimals}</td>
+              <td class="td">${x.is_base ? '<span class="badge badge-info">أساسية</span>' : x.is_active ? '<span class="badge badge-ok">مفعلة</span>' : '<span class="badge badge-mute">معطلة</span>'}</td>
+              <td class="td"><div class="flex gap-1">
+                <button data-cur-edit="${esc(x.code)}" class="btn btn-ghost btn-sm"><i class="bi bi-pencil"></i></button>
+                ${x.is_base ? '' : `<button data-cur-del="${esc(x.code)}" class="btn btn-ghost btn-sm text-rose-500"><i class="bi bi-trash3"></i></button>`}
+              </div></td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>
+      </div>`;
+  }
+
+  async function currencyForm(row, data) {
+    const cur = row || { code: '', name: '', symbol: '', rate: 1, decimals: 0, is_active: 1 };
+    const isNew = !row;
+    modal({
+      title: isNew ? 'إضافة عملة' : `تعديل العملة ${row.code}`,
+      size: 'max-w-md',
+      body: `
+        ${field('رمز العملة', `<input id="curCode" class="field font-mono" maxlength="5" value="${esc(cur.code)}" ${isNew ? '' : 'readonly'} />`)}
+        ${field('الاسم', `<input id="curName" class="field" value="${esc(cur.name)}" />`)}
+        ${field('الرمز المختصر', `<input id="curSymbol" class="field" value="${esc(cur.symbol || '')}" />`)}
+        ${field('سعر الصرف (1 وحدة = ؟ من العملة الأساسية)', `<input id="curRate" type="number" step="0.0001" class="field" value="${esc(String(cur.rate))}" ${isNew ? '' : ''} />`)}
+        ${field('عدد الخانات العشرية', `<input id="curDecimals" type="number" min="0" max="4" class="field" value="${esc(String(cur.decimals || 0))}" />`)}
+        ${isNew ? '' : `<label class="flex items-center gap-2 text-sm"><input type="checkbox" id="curActive" class="accent-zain-600" ${cur.is_active ? 'checked' : ''} /> العملة مفعلة</label>`}`,
+      footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="curSave" class="btn btn-primary">حفظ</button>`,
+      onMount(wrap, close) {
+        wrap.querySelector('[data-cancel]').addEventListener('click', close);
+        wrap.querySelector('#curSave').addEventListener('click', async () => {
+          const payload = {
+            name: wrap.querySelector('#curName').value,
+            symbol: wrap.querySelector('#curSymbol').value,
+            rate: Number(wrap.querySelector('#curRate').value),
+            decimals: Number(wrap.querySelector('#curDecimals').value),
+          };
+          if (isNew) payload.code = wrap.querySelector('#curCode').value;
+          else payload.is_active = wrap.querySelector('#curActive') ? (wrap.querySelector('#curActive').checked ? 1 : 0) : 1;
+          try {
+            if (isNew) await api('POST', '/api/currencies', payload);
+            else await api('PUT', `/api/currencies/${encodeURIComponent(row.code)}`, payload);
+            toast('تم الحفظ', 'success');
+            close();
+            renderAdmin(c);
+          } catch (e) { toast(e.message, 'error'); }
+        });
+      },
+    });
+  }
 
   function backupCard(res) {
     const rows = res.backups || [];

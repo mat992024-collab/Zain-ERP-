@@ -2,6 +2,7 @@ const db = require('../db');
 const { sendJson, HttpError } = require('../core/http');
 const ledger = require('../core/ledger');
 const { recordMovement } = require('./products.routes');
+const currency = require('./currency.routes');
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -86,7 +87,7 @@ function normalizeItems(rawItems) {
   });
 }
 
-function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId, items, discount, tax, paid, paymentMethod, notes, installmentPlan }) {
+function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId, items, discount, tax, paid, paymentMethod, notes, installmentPlan, currencyCode, exchangeRate, totalOriginal, paidOriginal }) {
   const subtotal = round2(items.reduce((s, i) => s + i.qty * i.unit_price, 0));
   const itemsDiscount = round2(items.reduce((s, i) => s + i.discount, 0));
   const invoiceDiscount = round2(discount || 0);
@@ -104,11 +105,14 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
   db.tx(() => {
     const res = db.run(
       `INSERT INTO invoices (invoice_no, type, pos_mode, customer_id, supplier_id, user_id, shift_id,
-        subtotal, discount, tax, total, paid, due, payment_method, status, notes, installment_plan)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?)`,
+        subtotal, discount, tax, total, paid, due, payment_method, status, notes, installment_plan,
+        currency, exchange_rate, total_original, paid_original)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)`,
       [invoiceNo, type, posMode, customerId || null, supplierId || null, userId || null, shiftId || null,
         subtotal, round2(itemsDiscount + invoiceDiscount), taxAmount, total, paidAmount, due,
-        paymentMethod, notes || null, installmentPlan ? JSON.stringify(installmentPlan) : null]
+        paymentMethod, notes || null, installmentPlan ? JSON.stringify(installmentPlan) : null,
+        currencyCode || null, exchangeRate || 1, totalOriginal === undefined ? null : totalOriginal,
+        paidOriginal === undefined ? null : paidOriginal]
     );
     invoiceId = Number(res.lastInsertRowid);
 
@@ -340,11 +344,30 @@ module.exports = {
         ? (body.payment_method === 'credit' ? 0 : total)
         : round2(body.paid);
       const due = round2(total - paidValue);
+      const cur = currency.currencyOf(body.currency);
+      const rate = Number(cur.rate) || 1;
+      let paidBase = paidValue;
+      let paidOriginal = round2(paidValue);
+      let totalOriginal = round2(total);
+      if (!cur.is_base) {
+        totalOriginal = currency.roundTo(total / rate, cur.decimals);
+        if (body.payment_method === 'credit') {
+          paidBase = 0;
+          paidOriginal = 0;
+        } else {
+          const given = body.paid_original === undefined || body.paid_original === null
+            ? total / rate
+            : Number(body.paid_original);
+          paidOriginal = currency.roundTo(given, cur.decimals);
+          paidBase = round2(paidOriginal * rate);
+        }
+      }
+      const dueWithCurrency = round2(total - paidBase);
       let creditWarning = null;
       if (type === 'sale') {
         creditWarning = creditLimitCheck({
           customerId: body.customer_id || null,
-          due,
+          due: dueWithCurrency,
           force: body.force_credit_limit === true,
           canOverride: ctx.can('sales.write'),
         });
@@ -359,10 +382,14 @@ module.exports = {
         items,
         discount: body.discount,
         tax: body.tax,
-        paid: paidValue,
+        paid: paidBase,
         paymentMethod: body.payment_method || 'cash',
         notes: body.notes,
         installmentPlan: body.installment_plan,
+        currencyCode: cur.code,
+        exchangeRate: rate,
+        totalOriginal,
+        paidOriginal,
       });
       db.logActivity(ctx.user.id, 'sale', 'invoices', result.id, { total: body.total });
       if (creditWarning) db.logActivity(ctx.user.id, 'credit_limit_override', 'invoices', result.id, creditWarning);
