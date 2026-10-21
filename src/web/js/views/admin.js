@@ -1,4 +1,4 @@
-import { api, state, esc, toast, modal, confirmBox, field, emptyState, hasPerm, applyTheme, currentTheme } from '../core.js';
+import { api, state, esc, toast, modal, confirmBox, field, emptyState, hasPerm, applyTheme, currentTheme, downloadFile, readFileBase64 } from '../core.js';
 
 const PERMISSIONS = [
   { key: 'pos.sell', label: 'البيع في نقاط البيع' },
@@ -13,6 +13,7 @@ const PERMISSIONS = [
   { key: 'ai.use', label: 'استخدام محرك الذكاء الاصطناعي' },
   { key: 'settings.write', label: 'تعديل الإعدادات' },
   { key: 'admin.users', label: 'إدارة المستخدمين والصلاحيات' },
+  { key: 'backup.manage', label: 'النسخ الاحتياطي والاستعادة' },
 ];
 
 const ROLE_LABELS = { admin: 'مدير النظام', manager: 'مدير', accountant: 'محاسب', cashier: 'كاشير', warehouse: 'أمين مخزن' };
@@ -20,6 +21,8 @@ const ROLE_LABELS = { admin: 'مدير النظام', manager: 'مدير', accou
 export async function renderAdmin(c) {
   const data = await api('GET', '/api/users');
   const canManage = hasPerm('admin.users');
+  const canBackup = hasPerm('backup.manage');
+  const backup = canBackup ? await api('GET', '/api/backup').catch(() => ({ backups: [], db_size: 0 })) : { backups: [], db_size: 0 };
 
   c.innerHTML = `
     <div class="card">
@@ -46,7 +49,8 @@ export async function renderAdmin(c) {
     <div class="card p-4">
       <div class="font-black mb-2"><i class="bi bi-info-circle text-zain-600"></i> ملاحظة</div>
       <p class="text-sm text-slate-500">دور "مدير النظام" يمتلك جميع الصلاحيات تلقائياً. للأدوار الأخرى حدّد الصلاحيات المطلوبة من نموذج التعديل.</p>
-    </div>`;
+    </div>
+    ${canBackup ? backupCard(backup) : ''}`;
 
   const addBtn = c.querySelector('#uAdd');
   if (addBtn) addBtn.addEventListener('click', () => userForm(null));
@@ -56,6 +60,73 @@ export async function renderAdmin(c) {
     if (!(await confirmBox(`${u.is_active ? 'تعطيل' : 'تفعيل'} المستخدم ${u.full_name}؟`))) return;
     try { await api('PATCH', `/api/users/${u.id}/status`, { is_active: u.is_active ? 0 : 1 }); toast('تم', 'success'); renderAdmin(c); } catch (e) { toast(e.message, 'error'); }
   }));
+
+  const bkCreate = c.querySelector('#bkCreate');
+  if (bkCreate) bkCreate.addEventListener('click', async () => {
+    bkCreate.disabled = true;
+    try { await api('POST', '/api/backup'); toast('تم إنشاء النسخة الاحتياطية', 'success'); await renderAdmin(c); }
+    catch (e) { toast(e.message, 'error'); bkCreate.disabled = false; }
+  });
+  c.querySelectorAll('[data-bk-dl]').forEach((b) => b.addEventListener('click', async () => {
+    try { await downloadFile(`/api/backup/${encodeURIComponent(b.dataset.bkDl)}/download`, b.dataset.bkDl); }
+    catch (e) { toast(e.message, 'error'); }
+  }));
+  c.querySelectorAll('[data-bk-restore]').forEach((b) => b.addEventListener('click', async () => {
+    if (!(await confirmBox('سيتم استبدال جميع البيانات الحالية بمحتوى النسخة الاحتياطية. هل أنت متأكد؟'))) return;
+    try {
+      await api('POST', `/api/backup/${encodeURIComponent(b.dataset.bkRestore)}/restore`);
+      toast('تمت الاستعادة بنجاح', 'success');
+      setTimeout(() => location.reload(), 800);
+    } catch (e) { toast(e.message, 'error'); }
+  }));
+  c.querySelectorAll('[data-bk-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (!(await confirmBox('حذف هذه النسخة الاحتياطية؟'))) return;
+    try { await api('DELETE', `/api/backup/${encodeURIComponent(b.dataset.bkDel)}`); toast('تم الحذف', 'success'); await renderAdmin(c); }
+    catch (e) { toast(e.message, 'error'); }
+  }));
+  const uploadInput = c.querySelector('#bkUpload');
+  if (uploadInput) uploadInput.addEventListener('change', async () => {
+    const file = uploadInput.files && uploadInput.files[0];
+    if (!file) return;
+    if (!(await confirmBox('سيتم استبدال جميع البيانات الحالية بمحتوى الملف. هل أنت متأكد؟'))) { uploadInput.value = ''; return; }
+    try {
+      const data = await readFileBase64(file);
+      await api('POST', '/api/backup/upload/restore', { data });
+      toast('تمت الاستعادة بنجاح', 'success');
+      setTimeout(() => location.reload(), 800);
+    } catch (e) { toast(e.message, 'error'); }
+    uploadInput.value = '';
+  });
+
+  function backupCard(res) {
+    const rows = res.backups || [];
+    return `
+      <div class="card mt-4" id="backupCard">
+        <div class="p-4 flex justify-between items-center border-b border-slate-100">
+          <div class="font-black flex items-center gap-2"><i class="bi bi-database-check text-zain-600"></i> النسخ الاحتياطي والاستعادة</div>
+          <div class="flex gap-2">
+            <label class="btn btn-ghost cursor-pointer"><i class="bi bi-upload"></i> استعادة من ملف<input type="file" id="bkUpload" accept=".db,application/octet-stream" class="hidden" /></label>
+            <button id="bkCreate" class="btn btn-primary"><i class="bi bi-download"></i> نسخة احتياطية الآن</button>
+          </div>
+        </div>
+        <div class="p-4">
+          <p class="text-xs text-slate-500 mb-3">تُحفظ النسخ داخل مجلد <span class="font-mono">data/backups</span> على هذا الجهاز. حجم القاعدة الحالية: ${(res.db_size / 1024).toFixed(0)} كيلوبايت.</p>
+          ${rows.length ? `<div class="overflow-auto max-h-64"><table class="w-full">
+            <thead><tr><th class="th">الملف</th><th class="th">التاريخ</th><th class="th">الحجم</th><th class="th"></th></tr></thead>
+            <tbody>${rows.map((b) => `<tr class="tr">
+              <td class="td font-mono text-xs">${esc(b.name)}</td>
+              <td class="td text-xs">${esc(new Date(b.created_at).toLocaleString('ar-IQ'))}</td>
+              <td class="td text-xs">${(b.size / 1024).toFixed(0)} KB</td>
+              <td class="td"><div class="flex gap-1">
+                <button data-bk-dl="${esc(b.name)}" class="btn btn-ghost btn-sm" title="تنزيل"><i class="bi bi-download"></i></button>
+                <button data-bk-restore="${esc(b.name)}" class="btn btn-ghost btn-sm" title="استعادة"><i class="bi bi-arrow-counterclockwise text-amber-600"></i></button>
+                <button data-bk-del="${esc(b.name)}" class="btn btn-ghost btn-sm" title="حذف"><i class="bi bi-trash text-rose-600"></i></button>
+              </div></td>
+            </tr>`).join('')}</tbody>
+          </table></div>` : emptyState('bi-database', 'لا توجد نسخ احتياطية بعد', 'أنشئ أول نسخة احتياطية الآن')}
+        </div>
+      </div>`;
+  }
 
   async function userForm(u) {
     const role = u ? u.role : 'cashier';

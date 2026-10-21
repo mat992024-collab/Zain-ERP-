@@ -1,4 +1,4 @@
-import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, formToObject } from '../core.js';
+import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, formToObject, downloadFile } from '../core.js';
 
 const TYPE_LABELS = { sale: 'بيع', return_sale: 'مرتجع بيع', purchase: 'شراء', return_purchase: 'مرتجع شراء' };
 
@@ -18,6 +18,7 @@ export async function renderSales(c) {
         <input id="sFrom" type="date" class="field !w-40" />
         <input id="sTo" type="date" class="field !w-40" />
         <button id="sApply" class="btn btn-primary"><i class="bi bi-funnel"></i> تصفية</button>
+        <button id="sExport" class="btn btn-ghost"><i class="bi bi-filetype-csv"></i> تصدير CSV</button>
         <div class="ml-auto text-lg font-black text-zain-700" id="sTotal"></div>
       </div>
       <div class="overflow-auto max-h-[calc(100vh-230px)]">
@@ -71,6 +72,16 @@ export async function renderSales(c) {
   });
   c.querySelector('#sPrev').addEventListener('click', () => { if (page > 1) { page--; load(); } });
   c.querySelector('#sNext').addEventListener('click', () => { page++; load(); });
+  c.querySelector('#sExport').addEventListener('click', async () => {
+    const q = new URLSearchParams();
+    if (filter.type) q.set('type', filter.type);
+    if (filter.from) q.set('from', filter.from);
+    if (filter.to) q.set('to', filter.to);
+    try {
+      await downloadFile('/api/export/sales?' + q.toString(), 'فواتير-البيع.csv');
+      toast('تم تصدير الملف', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
 
   async function view(id) {
     const data = await api('GET', `/api/sales/${id}`);

@@ -1,4 +1,4 @@
-import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, formToObject, debounce } from '../core.js';
+import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, formToObject, debounce, downloadFile } from '../core.js';
 
 export async function renderAccounting(c) {
   const tabs = [
@@ -9,16 +9,28 @@ export async function renderAccounting(c) {
     { key: 'partners', label: 'الشركاء', icon: 'bi-person-badge' },
     { key: 'trial', label: 'ميزان المراجعة', icon: 'bi-clipboard-data' },
   ];
+  const exportMap = { treasury: 'treasury', expenses: 'expenses', accounts: 'accounts' };
+  let activeTab = 'treasury';
   c.innerHTML = `
-    <div class="flex gap-2 mb-1 flex-wrap">
+    <div class="flex gap-2 mb-1 flex-wrap items-center">
       ${tabs.map((t, i) => `<button data-tab="${t.key}" class="btn ${i === 0 ? 'btn-primary' : 'btn-ghost'}"><i class="bi ${t.icon}"></i> ${t.label}</button>`).join('')}
+      <button id="accExport" class="btn btn-ghost mr-auto"><i class="bi bi-filetype-csv"></i> تصدير CSV</button>
     </div>
     <div id="accPane"></div>`;
   c.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
     c.querySelectorAll('[data-tab]').forEach((x) => { x.className = 'btn btn-ghost'; });
     b.className = 'btn btn-primary';
-    open(b.dataset.tab);
+    activeTab = b.dataset.tab;
+    open(activeTab);
   }));
+  c.querySelector('#accExport').addEventListener('click', async () => {
+    const entity = exportMap[activeTab];
+    if (!entity) { toast('التصدير متاح للخزنة والمصروفات والحسابات فقط', 'error'); return; }
+    try {
+      await downloadFile(`/api/export/${entity}`, `${entity}.csv`);
+      toast('تم تصدير الملف', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
 
   const pane = () => c.querySelector('#accPane');
   const open = (key) => ({ treasury: treasury, expenses: expenses, accounts: accounts, installments: installments, partners: partners, trial: trial }[key](pane()));
@@ -229,7 +241,10 @@ export async function renderShifts(c) {
     <div class="card">
       <div class="p-4 flex justify-between items-center border-b border-slate-100">
         <div class="font-black">سجل الورديات</div>
-        <div class="text-sm">${state.shift ? `<span class="badge badge-ok">وردية مفتوحة الآن</span>` : `<span class="badge badge-mute">لا توجد وردية مفتوحة</span>`}</div>
+        <div class="flex items-center gap-3">
+          <div class="text-sm">${state.shift ? `<span class="badge badge-ok">وردية مفتوحة الآن</span>` : `<span class="badge badge-mute">لا توجد وردية مفتوحة</span>`}</div>
+          <button id="shExport" class="btn btn-ghost"><i class="bi bi-filetype-csv"></i> تصدير CSV</button>
+        </div>
       </div>
       <div class="overflow-auto max-h-[70vh]"><table class="w-full">
         <thead><tr><th class="th">#</th><th class="th">الموظف</th><th class="th">الفتح</th><th class="th">الإغلاق</th><th class="th">رصيد الفتح</th><th class="th">المبيعات</th><th class="th">النقدي</th><th class="th">الآجل</th><th class="th">المتوقع</th><th class="th">الإقفال</th><th class="th">الحالة</th></tr></thead>
@@ -246,4 +261,10 @@ export async function renderShifts(c) {
         </tr>`).join('') || '<tr><td colspan="11" class="td text-center text-slate-400 py-8">لا توجد ورديات</td></tr>'}</tbody>
       </table></div>
     </div>`;
+  c.querySelector('#shExport').addEventListener('click', async () => {
+    try {
+      await downloadFile('/api/export/shifts', 'الورديات.csv');
+      toast('تم تصدير الملف', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
 }

@@ -1,4 +1,4 @@
-import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, debounce, formToObject } from '../core.js';
+import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, debounce, formToObject, downloadFile } from '../core.js';
 
 const BULK_FIELDS = ['name', 'barcode', 'part_number', 'author', 'category', 'brand', 'unit', 'cost_price', 'sale_price', 'wholesale_price', 'quantity', 'reorder_level', 'expiry_date', 'supplier_id', 'track_expiry', 'is_active', 'description'];
 
@@ -29,6 +29,7 @@ async function listView(c, { mode }) {
         <label class="flex items-center gap-2 text-sm font-bold text-slate-600 cursor-pointer"><input type="checkbox" id="pLow" ${lowOnly ? 'checked' : ''} class="w-4 h-4 accent-rose-500" /> النواقص فقط</label>
         <div class="flex-1"></div>
         <button id="pLabel" class="btn btn-ghost"><i class="bi bi-tags"></i> ملصقات باركود</button>
+        <button id="pExport" class="btn btn-ghost"><i class="bi bi-filetype-csv"></i> تصدير CSV</button>
         <button id="pBulk" class="btn btn-ghost"><i class="bi bi-percent"></i> تعديل أسعار</button>
         <button id="pAdd" class="btn btn-primary"><i class="bi bi-plus-lg"></i> صنف جديد</button>
       </div>
@@ -98,6 +99,12 @@ async function listView(c, { mode }) {
   c.querySelector('#pAdd').addEventListener('click', () => productForm(null, { categories, suppliers, onSave: load }));
   c.querySelector('#pBulk').addEventListener('click', () => bulkForm(categories, load));
   c.querySelector('#pLabel').addEventListener('click', () => labelsForm(null));
+  c.querySelector('#pExport').addEventListener('click', async () => {
+    try {
+      await downloadFile('/api/export/products', 'الأصناف.csv');
+      toast('تم تصدير الملف', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
 
   load();
 }

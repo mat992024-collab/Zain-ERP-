@@ -162,3 +162,38 @@ export function formToObject(root) {
   });
   return out;
 }
+
+export async function downloadFile(path, filename) {
+  const res = await fetch(path, { headers: state.token ? { Authorization: 'Bearer ' + state.token } : {} });
+  if (!res.ok) {
+    let msg = 'فشل التنزيل';
+    try {
+      const d = await res.json();
+      msg = d.error || msg;
+    } catch { }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  return blob.size;
+}
+
+export function readFileBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const idx = result.indexOf(',');
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    reader.onerror = () => reject(new Error('تعذر قراءة الملف'));
+    reader.readAsDataURL(file);
+  });
+}

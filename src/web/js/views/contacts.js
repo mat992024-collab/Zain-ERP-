@@ -1,4 +1,4 @@
-import { api, money, esc, toast, modal, confirmBox, field, formToObject } from '../core.js';
+import { api, money, esc, toast, modal, confirmBox, field, formToObject, downloadFile } from '../core.js';
 
 export async function renderCustomers(c) {
   await contactsView(c, 'customers');
@@ -23,6 +23,7 @@ async function contactsView(c, kind) {
           <input id="cSearch" class="field !pr-11" placeholder="بحث بالاسم / الهاتف" />
         </div>
         <div class="ml-auto text-sm text-slate-500">${labels.balance}: <b class="text-zain-700" id="cTotal">${money(isCustomer ? initial.debtors_total : initial.creditors_total)}</b></div>
+        <button id="cExport" class="btn btn-ghost"><i class="bi bi-filetype-csv"></i> تصدير CSV</button>
         <button id="cAdd" class="btn btn-primary"><i class="bi bi-plus-lg"></i> ${labels.add}</button>
       </div>
       <div class="overflow-auto max-h-[calc(100vh-230px)]">
@@ -77,6 +78,12 @@ async function contactsView(c, kind) {
     c._t = setTimeout(reload, 300);
   });
   c.querySelector('#cAdd').addEventListener('click', () => form(null));
+  c.querySelector('#cExport').addEventListener('click', async () => {
+    try {
+      await downloadFile(`/api/export/${isCustomer ? 'customers' : 'suppliers'}`, isCustomer ? 'العملاء.csv' : 'الموردون.csv');
+      toast('تم تصدير الملف', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
 
   function form(rec) {
     const r = rec || {};

@@ -242,6 +242,37 @@ async function main() {
   check('barcode labels render as SVG', svgCount > 0, 'svg=' + svgCount);
   check('label shows product name', /صنف اختبار المتصفح/.test(labelText), labelText.slice(0, 40).replace(/\n/g, ' '));
 
+  phase = 'export-download';
+  await nav(BASE);
+  await waitFor(`document.querySelectorAll('#nav [data-nav]').length > 0`);
+  await sleep(1200);
+  await evalJs(`location.hash = '#/sales'`);
+  await sleep(2000);
+  const exportBtn = await evalJs(`!!document.querySelector('#sExport')`);
+  check('sales export button present', exportBtn === true);
+  const dlDir = path.join(os.tmpdir(), 'zain-dl-' + Date.now());
+  fs.mkdirSync(dlDir, { recursive: true });
+  await send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: dlDir }).catch(() => {});
+  await evalJs(`document.querySelector('#sExport').click()`);
+  await sleep(3000);
+  const dlFiles = fs.existsSync(dlDir) ? fs.readdirSync(dlDir) : [];
+  const csvFile = dlFiles.find((f) => f.endsWith('.csv'));
+  check('CSV downloaded by the browser', !!csvFile, dlFiles.join(','));
+  if (csvFile) {
+    const body = fs.readFileSync(path.join(dlDir, csvFile));
+    check('downloaded CSV is valid UTF-8 with BOM', body[0] === 0xEF && body[1] === 0xBB && body[2] === 0xBF && body.toString('utf8').includes('رقم الفاتورة'), 'bytes=' + body.length);
+  }
+
+  phase = 'backup';
+  await evalJs(`location.hash = '#/admin'`);
+  await sleep(2200);
+  const bkCard = await evalJs(`!!document.getElementById('backupCard')`);
+  check('backup card rendered in admin', bkCard === true);
+  await evalJs(`document.getElementById('bkCreate').click()`);
+  await sleep(2500);
+  const bkRows = await evalJs(`document.querySelectorAll('#backupCard [data-bk-dl]').length`);
+  check('backup snapshot created and listed', bkRows >= 1, 'rows=' + bkRows);
+
   phase = 'offline';
   const external = [...new Set(requests)].filter((u) => !u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:') && !u.startsWith('about:'));
   check('no external network requests (works offline)', external.length === 0, external.join(' , '));

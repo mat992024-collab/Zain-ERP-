@@ -21,6 +21,8 @@ const MODULES = [
   require('./modules/ai.routes'),
   require('./modules/dashboard.routes'),
   require('./modules/print.routes'),
+  require('./modules/export.routes'),
+  require('./modules/backup.routes'),
 ];
 
 function buildRouter() {
