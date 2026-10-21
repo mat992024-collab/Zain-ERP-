@@ -11,9 +11,9 @@ npm run build:css      # إلزامي بعد أي تعديل على src/web/styl
 npm start              # تشغيل + فتح Edge/Chrome في وضع --app
 npm run serve          # الخادم فقط (المنفذ 4180 أو ZAIN_PORT)
 npm test               # 3 مجموعات: API + رسم شاشات + متصفح حقيقي
-npm run test:api       # tests/e2e.js            (59 فحصاً)
+npm run test:api       # tests/e2e.js            (82 فحصاً)
 npm run test:render    # tests/render.test.mjs   (12 فحصاً)
-npm run test:ui        # tests/browser.test.mjs  (41 فحصاً)
+npm run test:ui        # tests/browser.test.mjs  (49 فحصاً)
 npm run seed           # بيانات تجريبية
 npm run reset          # تصفير القاعدة
 ```
@@ -40,9 +40,9 @@ src/server/index.js          الراوتر + تقديم الملفات الثا
 src/server/schema.js         الجداول + DEFAULT_SETTINGS + INDUSTRY_PRESETS + SYSTEM_ACCOUNTS
 src/server/db.js             الاتصال + bootstrap (admin/admin)
 src/server/core/             http, auth, crud, ledger, code128, csv
-src/server/modules/          15 وحدة مسارات (79 endpoint)
+src/server/modules/          16 وحدة مسارات (statements للكشوف)
 src/web/index.html           الصدفة (login + shell + nav + content)
-src/web/js/core.js           state, api, toast, modal, money, esc, field, openPrint, hasPerm, applyTheme, toggleTheme, downloadFile
+src/web/js/core.js           state, api, toast, modal, money, esc, field, openPrint, hasPerm, applyTheme, toggleTheme, downloadFile, copyText
 src/web/js/main.js           bootstrap, hash-router, NAV, dashboard, وردية, دخول/خروج
 src/web/js/views/            pos, inventory, contacts, sales, accounting, ai, admin
 src/web/styles.css           مصدر Tailwind (يبني assets/app.css)
@@ -51,5 +51,5 @@ tests/                       e2e.js, render.test.mjs, browser.test.mjs
 
 ## قبل أي commit
 1. `npm run build:css` إذا لزم.
-2. `npm test` يجب أن يمرّ بالكامل (59 + 12 + 41) بدون console errors.
+2. `npm test` يجب أن يمرّ بالكامل (82 + 12 + 49) بدون console errors.
 3. لا تدفع `data/` أو `node_modules/` (مستثناة في `.gitignore`).

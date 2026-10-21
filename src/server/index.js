@@ -15,6 +15,7 @@ const MODULES = [
   require('./modules/customers.routes'),
   require('./modules/suppliers.routes'),
   require('./modules/sales.routes'),
+  require('./modules/statements.routes'),
   require('./modules/accounting.routes'),
   require('./modules/shifts.routes'),
   require('./modules/users.routes'),
@@ -108,7 +109,7 @@ function createServer() {
     } catch (err) {
       const status = err.status || 500;
       if (status >= 500) console.error('[zain]', err);
-      sendJson(res, status, { error: err.message || 'خطأ في الخادم', details: err.details });
+      sendJson(res, status, { error: err.message || 'خطأ في الخادم', code: err.code || null, details: err.details });
     }
   });
 

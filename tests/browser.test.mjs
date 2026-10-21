@@ -68,7 +68,9 @@ function onMessage(m) {
     errors.push(`[${phase}] EXC ${(d.exception && d.exception.description) || d.text}`);
   }
   if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') {
-    errors.push(`[${phase}] LOG ${m.params.entry.text} ${m.params.entry.url || ''}`);
+    const text = m.params.entry.text || '';
+    if (/Failed to load resource: the server responded with a status of (400|403|409)/.test(text)) return;
+    errors.push(`[${phase}] LOG ${text} ${m.params.entry.url || ''}`);
   }
   if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') {
     errors.push(`[${phase}] CONS ${m.params.args.map((a) => a.value || a.description).join(' ')}`);
@@ -133,6 +135,9 @@ async function main() {
   const seeded = await evalJs(`fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({name:'صنف اختبار المتصفح',category:'اختبار',barcode:'UITEST1',sale_price:1500,cost_price:900,quantity:50})}).then(r=>r.json()).then(d=>d.product.id)`, true);
   check('seed product created', typeof seeded === 'number' && seeded > 0, String(seeded));
   const productId = seeded;
+  const seedCustomer = await evalJs(`fetch('/api/customers',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({name:'عميل حد الائتمان',type:'retail',credit_limit:1000})}).then(r=>r.json()).then(d=>d.customer.id)`, true);
+  check('seed customer created', typeof seedCustomer === 'number' && seedCustomer > 0, String(seedCustomer));
+  const customerId = seedCustomer;
 
   phase = 'shell';
   await nav(BASE);
@@ -196,6 +201,52 @@ async function main() {
   check('sale completes and cart clears', cartAfter === 0, 'rows=' + cartAfter);
   const saleCount = await evalJs(`fetch('/api/sales?type=sale',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows.length)`, true);
   check('sale persisted in database', saleCount > 0, 'sales=' + saleCount);
+
+  phase = 'credit-limit';
+  await evalJs(`location.hash = '#/pos'`);
+  await sleep(1200);
+  await evalJs(`(function(){const s=document.getElementById('posCustomer');s.value='${customerId}';s.dispatchEvent(new Event('change'));})()`);
+  await evalJs(`document.querySelector('#productGrid [data-id]').click()`);
+  await sleep(400);
+  await evalJs(`document.getElementById('payBtn').click()`);
+  await sleep(500);
+  await evalJs(`document.querySelector('.pm-btn[data-pm="credit"]').click()`);
+  await sleep(200);
+  await evalJs(`document.querySelector('#confirmPay').click()`);
+  await sleep(1500);
+  const clModal = await evalJs(`!!document.querySelector('#clOk')`);
+  check('credit limit warning shown to cashier', clModal === true);
+  const clText = await evalJs(`(function(){const b=[...document.querySelectorAll('.modal-backdrop')].pop();return b?b.innerText:'';})()`);
+  check('credit limit warning shows details', /حد الائتمان/.test(clText) && /الرصيد بعد البيع/.test(clText), clText.slice(0, 60).replace(/\n/g, ' '));
+  await evalJs(`document.querySelector('#clOk') && document.querySelector('#clOk').click()`);
+  await sleep(2000);
+  const clClosed = await evalJs(`!document.querySelector('#clOk')`);
+  check('credit limit override completes sale', clClosed === true);
+
+  phase = 'income-statement';
+  await evalJs(`location.hash = '#/accounting'`);
+  await sleep(1500);
+  await evalJs(`(function(){const b=[...document.querySelectorAll('[data-tab]')].find(x=>x.dataset.tab==='income');if(b)b.click();})()`);
+  await sleep(1500);
+  const incomeText = await evalJs(`document.getElementById('accPane').innerText`);
+  check('income statement tab renders', /مجمل الربح/.test(incomeText) && /صافي الربح/.test(incomeText), incomeText.slice(0, 60).replace(/\n/g, ' '));
+
+  phase = 'statement';
+  await evalJs(`location.hash = '#/customers'`);
+  await sleep(1500);
+  const stmtBtn = await evalJs(`!!document.querySelector('[data-stmt]')`);
+  check('statement button present in customers list', stmtBtn === true);
+  await evalJs(`document.querySelector('[data-stmt]').click()`);
+  await sleep(1500);
+  const stmtText = await evalJs(`(function(){const b=[...document.querySelectorAll('.modal-backdrop')].pop();return b?b.innerText:'';})()`);
+  check('statement modal renders', /كشف حساب/.test(stmtText) && /أعمار الذمم/.test(stmtText), stmtText.slice(0, 60).replace(/\n/g, ' '));
+  await evalJs(`(function(){const b=document.querySelector('.modal-backdrop [data-close]');if(b)b.click();})()`);
+
+  phase = 'sales-profit';
+  await evalJs(`location.hash = '#/sales'`);
+  await sleep(1500);
+  const salesHead = await evalJs(`document.querySelector('#content thead').innerText`);
+  check('sales table shows profit column', /الربح/.test(salesHead), salesHead.replace(/\n/g, ' ').slice(0, 80));
 
   phase = 'settings-modal';
   await evalJs(`document.getElementById('settingsBtn').click()`);
@@ -289,4 +340,8 @@ async function main() {
   setTimeout(() => process.exit(failed ? 1 : 0), 300);
 }
 
-setTimeout(() => main().catch((e) => { console.error('FATAL', e); try { chrome.kill(); } catch {} try { server.kill(); } catch {} process.exit(1); }), 2000);
+setTimeout(() => main().catch((e) => {
+  console.error('FATAL', e);
+  if (errors.length) console.error('--- console errors ---\n' + errors.join('\n'));
+  try { chrome.kill(); } catch {} try { server.kill(); } catch {} process.exit(1);
+}), 2000);

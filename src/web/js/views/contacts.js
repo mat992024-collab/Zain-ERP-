@@ -1,4 +1,4 @@
-import { api, money, esc, toast, modal, confirmBox, field, formToObject, downloadFile } from '../core.js';
+import { api, state, money, esc, toast, modal, confirmBox, field, formToObject, downloadFile, openPrint, copyText } from '../core.js';
 
 export async function renderCustomers(c) {
   await contactsView(c, 'customers');
@@ -45,7 +45,7 @@ async function contactsView(c, kind) {
         <td class="td font-bold ${Number(r.balance) > 0 ? 'text-rose-600' : 'text-slate-500'}">${money(r.balance)}</td>
         <td class="td">
           <div class="flex gap-1">
-            ${isCustomer ? `<button data-stmt="${r.id}" class="btn btn-ghost btn-sm" title="كشف حساب"><i class="bi bi-file-text"></i></button>` : ''}
+            <button data-stmt="${r.id}" class="btn btn-ghost btn-sm" title="كشف حساب"><i class="bi bi-file-text"></i></button>
             <button data-pay="${r.id}" class="btn btn-ghost btn-sm text-emerald-600" title="دفعة"><i class="bi bi-cash-coin"></i></button>
             <button data-edit="${r.id}" class="btn btn-ghost btn-sm"><i class="bi bi-pencil"></i></button>
             <button data-del="${r.id}" class="btn btn-ghost btn-sm text-rose-500"><i class="bi bi-trash3"></i></button>
@@ -149,22 +149,66 @@ async function contactsView(c, kind) {
   }
 
   async function statement(id) {
-    const data = await api('GET', `/api/customers/${id}`);
+    const kind = isCustomer ? 'customer' : 'supplier';
+    const data = await api('GET', `/api/statements/${kind}/${id}`);
     modal({
-      title: `كشف حساب: ${data.customer.name}`,
-      size: 'max-w-3xl',
+      title: `كشف حساب: ${data.party.name}`,
+      size: 'max-w-4xl',
       body: `
-        <div class="grid grid-cols-3 gap-3 mb-4">
-          <div class="card p-3 text-center"><div class="text-xs text-slate-400">الرصيد</div><div class="font-black text-rose-600">${money(data.customer.balance)}</div></div>
-          <div class="card p-3 text-center"><div class="text-xs text-slate-400">عدد الفواتير</div><div class="font-black">${data.invoices.length}</div></div>
-          <div class="card p-3 text-center"><div class="text-xs text-slate-400">الأقساط</div><div class="font-black">${data.installments.length}</div></div>
+        <div class="grid grid-cols-4 gap-3 mb-4">
+          <div class="card p-3 text-center"><div class="text-xs text-slate-400">الرصيد الحالي</div><div class="font-black text-rose-600">${money(data.party.balance)}</div></div>
+          <div class="card p-3 text-center"><div class="text-xs text-slate-400">الرصيد الافتتاحي</div><div class="font-black">${money(data.opening)}</div></div>
+          <div class="card p-3 text-center"><div class="text-xs text-slate-400">أقدم مستحق</div><div class="font-black ${data.oldest_days > 60 ? 'text-rose-600' : ''}">${data.oldest_days} يوم</div></div>
+          <div class="card p-3 text-center"><div class="text-xs text-slate-400">عدد الحركات</div><div class="font-black">${data.rows.length}</div></div>
         </div>
-        <h4 class="font-bold mb-2">الفواتير</h4>
-        <table class="w-full mb-4"><thead><tr><th class="th">الفاتورة</th><th class="th">التاريخ</th><th class="th">الإجمالي</th><th class="th">المتبقي</th></tr></thead>
-        <tbody>${data.invoices.map((i) => `<tr class="tr"><td class="td">${esc(i.invoice_no)}</td><td class="td">${i.created_at}</td><td class="td">${money(i.total)}</td><td class="td">${money(i.due)}</td></tr>`).join('') || '<tr><td class="td text-center text-slate-400 py-6" colspan="4">لا يوجد</td></tr>'}</tbody></table>
-        <h4 class="font-bold mb-2">الأقساط</h4>
-        <table class="w-full"><thead><tr><th class="th">الإجمالي</th><th class="th">مدفوع</th><th class="th">متبقي</th><th class="th">الحالة</th></tr></thead>
-        <tbody>${data.installments.map((i) => `<tr class="tr"><td class="td">${money(i.total)}</td><td class="td">${money(i.paid_amount)}</td><td class="td">${money(i.remaining)}</td><td class="td">${esc(i.status)}</td></tr>`).join('') || '<tr><td class="td text-center text-slate-400 py-6" colspan="4">لا يوجد</td></tr>'}</tbody></table>`,
+        <div class="overflow-auto max-h-[46vh] mb-4">
+          <table class="w-full">
+            <thead><tr><th class="th">التاريخ</th><th class="th">البيان</th><th class="th">المرجع</th><th class="th">مدين</th><th class="th">دائن</th><th class="th">الرصيد</th></tr></thead>
+            <tbody>${data.rows.map((r) => `<tr class="tr">
+              <td class="td text-xs">${esc(r.date)}</td>
+              <td class="td">${esc(r.description)}</td>
+              <td class="td font-mono text-xs">${esc(r.ref)}</td>
+              <td class="td text-rose-600">${r.debit ? money(r.debit) : '—'}</td>
+              <td class="td text-emerald-600">${r.credit ? money(r.credit) : '—'}</td>
+              <td class="td font-bold">${money(r.balance)}</td>
+            </tr>`).join('') || '<tr><td class="td text-center text-slate-400 py-6" colspan="6">لا توجد حركات</td></tr>'}</tbody>
+          </table>
+        </div>
+        <h4 class="font-bold mb-2">أعمار الذمم</h4>
+        <div class="grid grid-cols-4 gap-3">
+          ${data.aging.map((b) => `<div class="card p-3 text-center">
+            <div class="text-[11px] text-slate-400">${esc(b.label)}</div>
+            <div class="font-black text-sm ${b.amount > 0 ? 'text-rose-600' : 'text-slate-400'}">${money(b.amount)}</div>
+            <div class="text-[10px] text-slate-400">${b.count} فاتورة</div>
+          </div>`).join('')}
+        </div>`,
+      footer: `<button data-close class="btn btn-ghost">إغلاق</button>
+        ${isCustomer ? '<button id="stRemind" class="btn btn-ghost"><i class="bi bi-chat-dots"></i> نص تذكير</button>' : ''}
+        <button id="stPrint" class="btn btn-primary"><i class="bi bi-printer"></i> طباعة الكشف</button>`,
+      onMount(wrap, close) {
+        wrap.querySelector('#stPrint').addEventListener('click', () => openPrint(`/api/print/statement/${kind}/${id}`));
+        const remind = wrap.querySelector('#stRemind');
+        if (remind) remind.addEventListener('click', () => reminderText(data, close));
+      },
+    });
+  }
+
+  function reminderText(data, closeStatement) {
+    const amount = Number(data.party.balance) || 0;
+    const text = `السلام عليكم أخي ${data.party.name}،\nنود تذكيركم بأن الذمم المستحقة لديكم مبلغ ${Number(amount).toLocaleString('ar-IQ')} ${state.settings.currency_symbol || 'د.ع'}، وتاريخ الاستحقاق ${data.oldest_days ? `منذ ${data.oldest_days} يوم` : 'حسب الفاتورة'}.\nنرجو التكرم بالسداد في أقرب وقت.\nشكراً لتعاونكم.`;
+    modal({
+      title: 'نص تذكير جاهز للنسخ',
+      size: 'max-w-lg',
+      body: `<p class="text-xs text-slate-500 mb-2">انسخ النص وأرسله للعميل عبر واتساب أو رسالة.</p>
+        <textarea id="remText" class="field h-40" readonly>${esc(text)}</textarea>`,
+      footer: `<button data-close class="btn btn-ghost">إغلاق</button><button id="remCopy" class="btn btn-primary"><i class="bi bi-clipboard"></i> نسخ النص</button>`,
+      onMount(wrap, close) {
+        wrap.querySelector('[data-close]').addEventListener('click', () => { close(); closeStatement(); });
+        wrap.querySelector('#remCopy').addEventListener('click', async () => {
+          const done = await copyText(wrap.querySelector('#remText').value);
+          toast(done ? 'تم نسخ النص' : 'تعذر النسخ، انسخ يدوياً', done ? 'success' : 'error');
+        });
+      },
     });
   }
 }

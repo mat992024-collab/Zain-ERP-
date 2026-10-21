@@ -1,6 +1,8 @@
 const db = require('../db');
 const { sendJson, sendText } = require('../core/http');
 const code128 = require('../core/code128');
+const statements = require('./statements.routes');
+const accounting = require('./accounting.routes');
 
 function esc(str = '') {
   return String(str)
@@ -33,6 +35,29 @@ ${bodyCss}
 </div>
 </body></html>`;
 }
+
+const A4_CSS = `
+  * { box-sizing: border-box; }
+  body { font-family: 'Cairo','Segoe UI',Tahoma,sans-serif; direction: rtl; text-align: right;
+         color: #0f172a; margin: 0; padding: 16px; }
+  header { display: flex; justify-content: space-between; align-items: flex-start;
+           border-bottom: 3px solid #6366f1; padding-bottom: 12px; margin-bottom: 18px; }
+  h1 { margin: 0; font-size: 26px; color: #6366f1; }
+  .meta { text-align: left; font-size: 13px; line-height: 1.7; }
+  table.items { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  table.items th { background: #eef2ff; color: #3730a3; padding: 9px 8px; border: 1px solid #c7d2fe; }
+  table.items td { padding: 7px 8px; border: 1px solid #e2e8f0; }
+  .totals { width: 320px; margin: 16px 0 0 auto; font-size: 14px; }
+  .totals div { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed #cbd5e1; }
+  .totals .grand { font-weight: bold; font-size: 17px; border-bottom: 0; color: #4338ca; }
+  footer { margin-top: 48px; display: flex; justify-content: space-between; font-size: 13px; color: #475569; }
+  .badge { display: inline-block; background: #f1f5f9; border: 1px solid #cbd5e1; padding: 4px 12px;
+           border-radius: 999px; font-size: 12px; }
+  .cards { display: flex; gap: 10px; margin: 12px 0 18px; }
+  .cards .box { flex: 1; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; text-align: center; }
+  .cards .box .lbl { font-size: 11px; color: #64748b; }
+  .cards .box .val { font-size: 17px; font-weight: bold; margin-top: 3px; }
+`;
 
 const THERMAL_CSS = (mm) => `
   * { box-sizing: border-box; }
@@ -120,24 +145,7 @@ module.exports = {
           </tr>`
         )
         .join('');
-      const css = `
-        * { box-sizing: border-box; }
-        body { font-family: 'Cairo','Segoe UI',Tahoma,sans-serif; direction: rtl; text-align: right;
-               color: #0f172a; margin: 0; padding: 16px; }
-        header { display: flex; justify-content: space-between; align-items: flex-start;
-                 border-bottom: 3px solid #6366f1; padding-bottom: 12px; margin-bottom: 18px; }
-        h1 { margin: 0; font-size: 26px; color: #6366f1; }
-        .meta { text-align: left; font-size: 13px; line-height: 1.7; }
-        table.items { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
-        table.items th { background: #eef2ff; color: #3730a3; padding: 9px 8px; border: 1px solid #c7d2fe; }
-        table.items td { padding: 7px 8px; border: 1px solid #e2e8f0; }
-        .totals { width: 320px; margin: 16px 0 0 auto; font-size: 14px; }
-        .totals div { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed #cbd5e1; }
-        .totals .grand { font-weight: bold; font-size: 17px; border-bottom: 0; color: #4338ca; }
-        footer { margin-top: 48px; display: flex; justify-content: space-between; font-size: 13px; color: #475569; }
-        .badge { display: inline-block; background: #f1f5f9; border: 1px solid #cbd5e1; padding: 4px 12px;
-                 border-radius: 999px; font-size: 12px; }
-      `;
+      const css = A4_CSS;
       const body = `
         <header>
           <div>
@@ -223,6 +231,119 @@ module.exports = {
           .join('')}
       `;
       sendText(ctx.res, 200, htmlDoc('ملصقات الباركود', css, body), 'text/html; charset=utf-8');
+    });
+
+    router.get('/api/print/statement/:kind/:id', (ctx) => {
+      const statement = statements.buildStatement(ctx.params.kind, ctx.params.id, {
+        from: ctx.query.from || null,
+        to: ctx.query.to || null,
+      });
+      const settings = db.getSettings();
+      const cur = settings.currency_symbol || 'د.ع';
+      const rows = statement.rows.map((r) => `
+        <tr>
+          <td style="white-space:nowrap">${esc(r.date)}</td>
+          <td>${esc(r.description)}</td>
+          <td style="font-family:monospace">${esc(r.ref)}</td>
+          <td style="text-align:left">${r.debit ? money(r.debit, '') : '—'}</td>
+          <td style="text-align:left">${r.credit ? money(r.credit, '') : '—'}</td>
+          <td style="text-align:left;font-weight:bold">${money(r.balance, '')}</td>
+        </tr>`).join('');
+      const body = `
+        <header>
+          <div>
+            <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
+            <div style="font-size:13px;color:#475569;margin-top:6px">
+              ${esc(settings.company_address || '')}<br/>
+              ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
+            </div>
+          </div>
+          <div class="meta">
+            <span class="badge">${esc(statement.title)}</span><br/><br/>
+            <b>${esc(statement.party.name)}</b><br/>
+            ${statement.party.phone ? 'الهاتف: ' + esc(statement.party.phone) + '<br/>' : ''}
+            ${statement.period.from ? `من: ${esc(statement.period.from)}<br/>` : ''}
+            ${statement.period.to ? `إلى: ${esc(statement.period.to)}<br/>` : ''}
+            تاريخ الإصدار: ${esc(statement.generated_at)}
+          </div>
+        </header>
+        <div class="cards">
+          <div class="box"><div class="lbl">الرصيد الافتتاحي</div><div class="val">${money(statement.opening, cur)}</div></div>
+          <div class="box"><div class="lbl">مدين (فواتير)</div><div class="val">${money(statement.totals.debit, cur)}</div></div>
+          <div class="box"><div class="lbl">دائن (سداد)</div><div class="val">${money(statement.totals.credit, cur)}</div></div>
+          <div class="box"><div class="lbl">الرصيد الختامي</div><div class="val" style="color:#4338ca">${money(statement.totals.closing, cur)}</div></div>
+        </div>
+        <table class="items">
+          <thead><tr><th>التاريخ</th><th>البيان</th><th>المرجع</th><th>مدين</th><th>دائن</th><th>الرصيد</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6" style="text-align:center;padding:18px">لا توجد حركات</td></tr>'}</tbody>
+        </table>
+        <footer>
+          <div>${esc(settings.receipt_footer || '')}</div>
+          <div style="text-align:left">توقيع ${esc(statement.kind === 'customer' ? 'العميل' : 'المورد')}: ....................</div>
+        </footer>`;
+      sendText(ctx.res, 200, htmlDoc(statement.title, A4_CSS, body), 'text/html; charset=utf-8');
+    });
+
+    router.get('/api/print/income-statement', (ctx) => {
+      const data = accounting.buildIncomeStatement(ctx.query);
+      const settings = db.getSettings();
+      const cur = settings.currency_symbol || 'د.ع';
+      const expenseRows = data.expenses_by_category.map((x) => `
+        <tr><td>${esc(x.category)}</td><td style="text-align:left">${money(x.amount, '')}</td><td style="text-align:left">${x.count}</td></tr>`).join('');
+      const productRows = data.top_products.map((x) => `
+        <tr>
+          <td>${esc(x.name)}</td>
+          <td style="text-align:left">${x.qty}</td>
+          <td style="text-align:left">${money(x.revenue, '')}</td>
+          <td style="text-align:left">${money(x.cost, '')}</td>
+          <td style="text-align:left;font-weight:bold">${money(x.profit, '')}</td>
+          <td style="text-align:left">${Number(x.margin_pct).toFixed(1)}%</td>
+        </tr>`).join('');
+      const body = `
+        <header>
+          <div>
+            <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
+            <div style="font-size:13px;color:#475569;margin-top:6px">
+              ${esc(settings.company_address || '')}<br/>
+              ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
+            </div>
+          </div>
+          <div class="meta">
+            <span class="badge">قائمة الدخل</span><br/><br/>
+            ${data.period.from ? `من: ${esc(data.period.from)}<br/>` : ''}
+            ${data.period.to ? `إلى: ${esc(data.period.to)}<br/>` : ''}
+            عدد الفواتير: ${data.sales_count}
+          </div>
+        </header>
+        <div class="cards">
+          <div class="box"><div class="lbl">صافي الإيرادات</div><div class="val">${money(data.revenue, cur)}</div></div>
+          <div class="box"><div class="lbl">مجمل الربح</div><div class="val" style="color:#059669">${money(data.gross_profit, cur)}</div></div>
+          <div class="box"><div class="lbl">المصروفات</div><div class="val" style="color:#e11d48">${money(data.expenses_total, cur)}</div></div>
+          <div class="box"><div class="lbl">صافي الربح</div><div class="val" style="color:#4338ca">${money(data.net_profit, cur)}</div></div>
+        </div>
+        <table class="items">
+          <thead><tr><th>البند</th><th style="text-align:left">المبلغ</th><th style="text-align:left">العدد</th></tr></thead>
+          <tbody>
+            <tr><td>إجمالي المبيعات</td><td style="text-align:left">${money(data.sales_total, '')}</td><td style="text-align:left">${data.sales_count}</td></tr>
+            <tr><td>مرتجعات البيع</td><td style="text-align:left">-${money(data.returns_total, '')}</td><td style="text-align:left"></td></tr>
+            <tr><td><b>صافي الإيرادات</b></td><td style="text-align:left"><b>${money(data.revenue, '')}</b></td><td style="text-align:left"></td></tr>
+            <tr><td>تكلفة البضاعة المباعة</td><td style="text-align:left">-${money(data.cogs, '')}</td><td style="text-align:left"></td></tr>
+            <tr><td><b>مجمل الربح</b></td><td style="text-align:left"><b>${money(data.gross_profit, '')}</b></td><td style="text-align:left">${Number(data.gross_margin).toFixed(1)}%</td></tr>
+            ${expenseRows}
+            <tr><td>إيرادات أخرى</td><td style="text-align:left">+${money(data.other_income, '')}</td><td style="text-align:left"></td></tr>
+            <tr><td><b>صافي الربح</b></td><td style="text-align:left"><b>${money(data.net_profit, '')}</b></td><td style="text-align:left">${Number(data.net_margin).toFixed(1)}%</td></tr>
+          </tbody>
+        </table>
+        <h2 style="font-size:16px;margin:22px 0 8px">أكثر الأصناف ربحية</h2>
+        <table class="items">
+          <thead><tr><th>الصنف</th><th style="text-align:left">الكمية</th><th style="text-align:left">المبيعات</th><th style="text-align:left">التكلفة</th><th style="text-align:left">الربح</th><th style="text-align:left">الهامش</th></tr></thead>
+          <tbody>${productRows || '<tr><td colspan="6" style="text-align:center;padding:16px">لا توجد مبيعات</td></tr>'}</tbody>
+        </table>
+        <footer>
+          <div>${esc(settings.receipt_footer || '')}</div>
+          <div style="text-align:left">المدير: ....................</div>
+        </footer>`;
+      sendText(ctx.res, 200, htmlDoc('قائمة الدخل', A4_CSS, body), 'text/html; charset=utf-8');
     });
 
     router.get('/api/print/barcode/:productId', (ctx) => {

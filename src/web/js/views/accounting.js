@@ -7,6 +7,7 @@ export async function renderAccounting(c) {
     { key: 'accounts', label: 'شجرة الحسابات', icon: 'bi-diagram-3' },
     { key: 'installments', label: 'الأقساط', icon: 'bi-calendar-check' },
     { key: 'partners', label: 'الشركاء', icon: 'bi-person-badge' },
+    { key: 'income', label: 'قائمة الدخل', icon: 'bi-graph-up-arrow' },
     { key: 'trial', label: 'ميزان المراجعة', icon: 'bi-clipboard-data' },
   ];
   const exportMap = { treasury: 'treasury', expenses: 'expenses', accounts: 'accounts' };
@@ -33,7 +34,7 @@ export async function renderAccounting(c) {
   });
 
   const pane = () => c.querySelector('#accPane');
-  const open = (key) => ({ treasury: treasury, expenses: expenses, accounts: accounts, installments: installments, partners: partners, trial: trial }[key](pane()));
+  const open = (key) => ({ treasury: treasury, expenses: expenses, accounts: accounts, installments: installments, partners: partners, income: income, trial: trial }[key](pane()));
   treasury(pane());
 
   async function treasury(p) {
@@ -223,6 +224,70 @@ export async function renderAccounting(c) {
       if (!(await confirmBox('أرشفة الشريك؟'))) return;
       await api('DELETE', `/api/partners/${b.dataset.del}`); toast('تم', 'success'); partners(p);
     }));
+  }
+
+  async function income(p) {
+    const from = p.querySelector('#incFrom') ? p.querySelector('#incFrom').value : '';
+    const to = p.querySelector('#incTo') ? p.querySelector('#incTo').value : '';
+    const q = new URLSearchParams();
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    const data = await api('GET', '/api/reports/income-statement?' + q.toString());
+    p.innerHTML = `
+      <div class="card p-4 mb-4 flex flex-wrap items-end gap-3">
+        <div><label class="label">من تاريخ</label><input id="incFrom" type="date" class="field !w-40" value="${esc(from)}" /></div>
+        <div><label class="label">إلى تاريخ</label><input id="incTo" type="date" class="field !w-40" value="${esc(to)}" /></div>
+        <button id="incApply" class="btn btn-primary"><i class="bi bi-funnel"></i> عرض</button>
+        <button id="incPrint" class="btn btn-ghost"><i class="bi bi-printer"></i> طباعة</button>
+      </div>
+      <div class="grid grid-cols-4 gap-4 mb-4">
+        <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-cash-stack"></i></div><div><div class="kpi-value">${money(data.revenue)}</div><div class="kpi-label">صافي المبيعات (${data.sales_count} فاتورة)</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-amber-100 text-amber-700"><i class="bi bi-box-seam"></i></div><div><div class="kpi-value">${money(data.cogs)}</div><div class="kpi-label">تكلفة البضاعة المباعة</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-graph-up"></i></div><div><div class="kpi-value">${money(data.gross_profit)}</div><div class="kpi-label">مجمل الربح (${Number(data.gross_margin).toFixed(1)}%)</div></div></div>
+        <div class="kpi"><div class="kpi-icon ${Number(data.net_profit) >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}"><i class="bi bi-trophy"></i></div><div><div class="kpi-value">${money(data.net_profit)}</div><div class="kpi-label">صافي الربح (${Number(data.net_margin).toFixed(1)}%)</div></div></div>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div class="card">
+          <div class="p-4 border-b border-slate-100 font-black">تفصيل قائمة الدخل</div>
+          <div class="p-4 space-y-2 text-sm">
+            <div class="flex justify-between"><span>إجمالي المبيعات</span><b>${money(data.sales_total)}</b></div>
+            <div class="flex justify-between text-rose-600"><span>مرتجعات البيع</span><b>-${money(data.returns_total)}</b></div>
+            <div class="flex justify-between border-b border-dashed pb-2"><span class="font-bold">صافي الإيرادات</span><b class="text-zain-700">${money(data.revenue)}</b></div>
+            <div class="flex justify-between text-rose-600"><span>تكلفة البضاعة المباعة</span><b>-${money(data.cogs)}</b></div>
+            <div class="flex justify-between border-b border-dashed pb-2"><span class="font-bold">مجمل الربح</span><b class="text-emerald-600">${money(data.gross_profit)}</b></div>
+            <div class="flex justify-between text-rose-600"><span>المصروفات التشغيلية</span><b>-${money(data.expenses_total)}</b></div>
+            <div class="flex justify-between text-emerald-600"><span>إيرادات أخرى</span><b>+${money(data.other_income)}</b></div>
+            <div class="flex justify-between border-b border-dashed pb-2"><span class="font-bold">صافي الربح</span><b class="${Number(data.net_profit) >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${money(data.net_profit)}</b></div>
+            <div class="flex justify-between"><span class="text-slate-500">متوسط الفاتورة</span><b>${money(data.avg_ticket)}</b></div>
+            <div class="flex justify-between"><span class="text-slate-500">فواتير الشراء</span><b>${money(data.purchases_total)}</b></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="p-4 border-b border-slate-100 font-black">المصروفات حسب البند</div>
+          <div class="overflow-auto max-h-56">
+            <table class="w-full">
+              <thead><tr><th class="th">البند</th><th class="th">العدد</th><th class="th">المبلغ</th></tr></thead>
+              <tbody>${data.expenses_by_category.map((x) => `<tr class="tr"><td class="td">${esc(x.category)}</td><td class="td">${x.count}</td><td class="td font-bold text-rose-600">${money(x.amount)}</td></tr>`).join('') || '<tr><td colspan="3" class="td text-center text-slate-400 py-6">لا توجد مصروفات</td></tr>'}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="card mt-4">
+        <div class="p-4 border-b border-slate-100 font-black">أكثر الأصناف ربحية</div>
+        <div class="overflow-auto max-h-64">
+          <table class="w-full">
+            <thead><tr><th class="th">الصنف</th><th class="th">الكمية</th><th class="th">المبيعات</th><th class="th">التكلفة</th><th class="th">الربح</th><th class="th">الهامش</th></tr></thead>
+            <tbody>${data.top_products.map((x) => `<tr class="tr"><td class="td font-bold">${esc(x.name)}</td><td class="td">${num(x.qty)}</td><td class="td">${money(x.revenue)}</td><td class="td">${money(x.cost)}</td><td class="td font-bold text-emerald-600">${money(x.profit)}</td><td class="td">${Number(x.margin_pct).toFixed(1)}%</td></tr>`).join('') || '<tr><td colspan="6" class="td text-center text-slate-400 py-6">لا توجد مبيعات</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>`;
+    p.querySelector('#incApply').addEventListener('click', () => income(p));
+    p.querySelector('#incPrint').addEventListener('click', () => {
+      const params = new URLSearchParams();
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+      openPrint('/api/print/income-statement?' + params.toString());
+    });
   }
 
   async function trial(p) {

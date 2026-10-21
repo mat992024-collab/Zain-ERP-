@@ -23,7 +23,7 @@ export async function renderSales(c) {
       </div>
       <div class="overflow-auto max-h-[calc(100vh-230px)]">
         <table class="w-full">
-          <thead><tr><th class="th">الفاتورة</th><th class="th">التاريخ</th><th class="th">النوع</th><th class="th">العميل/المورد</th><th class="th">الأصناف</th><th class="th">الدفع</th><th class="th">الإجمالي</th><th class="th">المتبقي</th><th class="th"></th></tr></thead>
+          <thead><tr><th class="th">الفاتورة</th><th class="th">التاريخ</th><th class="th">النوع</th><th class="th">العميل/المورد</th><th class="th">الأصناف</th><th class="th">الدفع</th><th class="th">الإجمالي</th><th class="th">الربح</th><th class="th">المتبقي</th><th class="th"></th></tr></thead>
           <tbody id="sBody"></tbody>
         </table>
       </div>
@@ -48,16 +48,19 @@ export async function renderSales(c) {
         <td class="td">${r.items_count}</td>
         <td class="td text-xs">${r.payment_method}</td>
         <td class="td font-bold">${money(r.total)}</td>
+        <td class="td font-bold ${Number(r.profit) > 0 ? 'text-emerald-600' : Number(r.profit) < 0 ? 'text-rose-600' : 'text-slate-400'}">${r.type === 'sale' || r.type === 'return_sale' ? money(r.profit) : '—'}</td>
         <td class="td ${Number(r.due) > 0 ? 'text-rose-600 font-bold' : ''}">${money(r.due)}</td>
         <td class="td"><div class="flex gap-1">
           <button data-view="${r.id}" class="btn btn-ghost btn-sm"><i class="bi bi-eye"></i></button>
           <button data-print="${r.id}" class="btn btn-ghost btn-sm"><i class="bi bi-printer"></i></button>
-          ${r.type === 'sale' ? `<button data-ret="${r.id}" class="btn btn-ghost btn-sm text-amber-600"><i class="bi bi-arrow-return-right"></i></button>` : ''}
+          ${r.type === 'sale' ? `<button data-ret="${r.id}" class="btn btn-ghost btn-sm text-amber-600" title="مرتجع بيع"><i class="bi bi-arrow-return-right"></i></button>` : ''}
+          ${r.type === 'purchase' ? `<button data-puret="${r.id}" class="btn btn-ghost btn-sm text-amber-600" title="مرتجع شراء"><i class="bi bi-arrow-return-left"></i></button>` : ''}
         </div></td>
-      </tr>`).join('') : `<tr><td colspan="9" class="td text-center text-slate-400 py-10">لا توجد فواتير</td></tr>`;
+      </tr>`).join('') : `<tr><td colspan="10" class="td text-center text-slate-400 py-10">لا توجد فواتير</td></tr>`;
     c.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view(+b.dataset.view)));
     c.querySelectorAll('[data-print]').forEach((b) => b.addEventListener('click', () => printMenu(+b.dataset.print)));
     c.querySelectorAll('[data-ret]').forEach((b) => b.addEventListener('click', () => salesReturn(+b.dataset.ret, load)));
+    c.querySelectorAll('[data-puret]').forEach((b) => b.addEventListener('click', () => purchaseReturn(+b.dataset.puret, load)));
   };
 
   c.querySelector('#sApply').addEventListener('click', () => {
@@ -105,14 +108,20 @@ export async function renderSales(c) {
             <div class="flex justify-between font-black text-lg text-zain-700 border-t border-dashed pt-2"><span>المجموع</span><span>${money(inv.total)}</span></div>
             <div class="flex justify-between"><span class="text-slate-500">مدفوع</span><span>${money(inv.paid)}</span></div>
             <div class="flex justify-between text-rose-600 font-bold"><span>متبقي</span><span>${money(inv.due)}</span></div>
+            ${inv.type === 'sale' || inv.type === 'return_sale' ? `
+              <div class="flex justify-between border-t border-dashed pt-2"><span class="text-slate-500">تكلفة البضاعة</span><span>${money(inv.cost_total)}</span></div>
+              <div class="flex justify-between font-black ${Number(inv.profit) >= 0 ? 'text-emerald-600' : 'text-rose-600'}"><span>الربح</span><span>${money(inv.profit)} (${Number(inv.margin_pct).toFixed(1)}%)</span></div>` : ''}
           </div>
         </div>`,
       footer: `<button data-close class="btn btn-ghost">إغلاق</button>
+        ${inv.customer_id ? `<button id="vStmt" class="btn btn-ghost"><i class="bi bi-file-text"></i> كشف الحساب</button>` : ''}
         <button id="vThermal" class="btn btn-primary"><i class="bi bi-receipt"></i> حراري</button>
         <button id="vA4" class="btn btn-ghost"><i class="bi bi-file-earmark-text"></i> A4</button>`,
       onMount(wrap, close) {
         wrap.querySelector('#vThermal').addEventListener('click', () => openPrint(`/api/print/thermal/${id}?width=${state.settings.printer_type === 'thermal58' ? 58 : 80}`));
         wrap.querySelector('#vA4').addEventListener('click', () => openPrint(`/api/print/a4/${id}`));
+        const stmtBtn = wrap.querySelector('#vStmt');
+        if (stmtBtn) stmtBtn.addEventListener('click', () => openPrint(`/api/print/statement/customer/${inv.customer_id}`));
       },
     });
   }
@@ -141,6 +150,17 @@ export async function renderSales(c) {
     try {
       await api('POST', `/api/sales/${id}/return`, {});
       toast('تم إنشاء مرتجع البيع', 'success');
+      reload();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function purchaseReturn(id, reload) {
+    const data = await api('GET', `/api/sales/${id}`);
+    if (data.invoice.type !== 'purchase') { toast('يمكن إرجاع فواتير الشراء فقط', 'error'); return; }
+    if (!(await confirmBox('إرجاع فاتورة الشراء إلى المورد وخصم الأصناف من المخزون؟'))) return;
+    try {
+      await api('POST', `/api/purchases/${id}/return`, {});
+      toast('تم إنشاء مرتجع الشراء', 'success');
       reload();
     } catch (e) { toast(e.message, 'error'); }
   }
@@ -181,7 +201,47 @@ export async function renderPurchases(c) {
         <div class="mt-4 bg-slate-50 rounded-xl p-3 flex justify-between font-black text-lg"><span>المجموع</span><span id="puTotal" class="text-zain-700">0</span></div>
         <button id="puSave" class="btn btn-success w-full mt-3 !py-3"><i class="bi bi-check2-circle"></i> حفظ فاتورة الشراء</button>
       </div>
+    </div>
+    <div class="card mt-4">
+      <div class="p-4 flex justify-between items-center border-b border-slate-100">
+        <div class="font-black">فواتير الشراء الأخيرة</div>
+        <span class="text-xs text-slate-500">اضغط أيقونة الإرجاع لتسجيل مرتجع شراء</span>
+      </div>
+      <div class="overflow-auto max-h-[42vh]">
+        <table class="w-full">
+          <thead><tr><th class="th">الفاتورة</th><th class="th">التاريخ</th><th class="th">المورد</th><th class="th">الإجمالي</th><th class="th">المدفوع</th><th class="th">المتبقي</th><th class="th"></th></tr></thead>
+          <tbody id="puList"></tbody>
+        </table>
+      </div>
     </div>`;
+
+  const loadPurchases = async () => {
+    const data = await api('GET', '/api/sales?type=purchase&page_size=20');
+    c.querySelector('#puList').innerHTML = data.rows.length ? data.rows.map((r) => `
+      <tr class="tr">
+        <td class="td font-mono text-xs font-bold text-zain-700">${esc(r.invoice_no)}</td>
+        <td class="td text-xs">${esc(r.created_at)}</td>
+        <td class="td">${esc(r.supplier_name || '—')}</td>
+        <td class="td font-bold">${money(r.total)}</td>
+        <td class="td text-emerald-600">${money(r.paid)}</td>
+        <td class="td ${Number(r.due) > 0 ? 'text-rose-600 font-bold' : ''}">${money(r.due)}</td>
+        <td class="td"><div class="flex gap-1">
+          <button data-pview="${r.id}" class="btn btn-ghost btn-sm"><i class="bi bi-eye"></i></button>
+          <button data-pprint="${r.id}" class="btn btn-ghost btn-sm"><i class="bi bi-printer"></i></button>
+          <button data-puret="${r.id}" class="btn btn-ghost btn-sm text-amber-600" title="مرتجع شراء"><i class="bi bi-arrow-return-left"></i></button>
+        </div></td>
+      </tr>`).join('') : '<tr><td colspan="7" class="td text-center text-slate-400 py-8">لا توجد فواتير شراء</td></tr>';
+    c.querySelectorAll('[data-pview]').forEach((b) => b.addEventListener('click', () => openPrint(`/api/print/a4/${b.dataset.pview}`)));
+    c.querySelectorAll('[data-pprint]').forEach((b) => b.addEventListener('click', () => openPrint(`/api/print/a4/${b.dataset.pprint}`)));
+    c.querySelectorAll('[data-puret]').forEach((b) => b.addEventListener('click', async () => {
+      if (!(await confirmBox('تسجيل مرتجع شراء وخصم الأصناف من المخزون؟'))) return;
+      try {
+        await api('POST', `/api/purchases/${b.dataset.puret}/return`, {});
+        toast('تم إنشاء مرتجع الشراء', 'success');
+        loadPurchases();
+      } catch (e) { toast(e.message, 'error'); }
+    }));
+  };
 
   const renderLines = () => {
     c.querySelector('#puBody').innerHTML = lines.length ? lines.map((l, i) => `
@@ -239,8 +299,10 @@ export async function renderPurchases(c) {
       products.length = 0;
       products.push(...fresh.rows);
       c.querySelector('#puProduct').innerHTML = `<option value="">اختر صنفاً لإضافته...</option>${products.map((p) => `<option value="${p.id}">${esc(p.name)} — ${esc(p.barcode || '')}</option>`).join('')}`;
+      loadPurchases();
     } catch (e) { toast(e.message, 'error'); }
   });
 
   renderLines();
+  loadPurchases();
 }

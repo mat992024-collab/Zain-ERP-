@@ -25,6 +25,8 @@ export async function api(method, path, body) {
   if (!res.ok) {
     const err = new Error((data && data.error) || `خطأ ${res.status}`);
     err.status = res.status;
+    err.code = data && data.code;
+    err.details = data && data.details;
     throw err;
   }
   return data;
@@ -196,4 +198,25 @@ export function readFileBase64(file) {
     reader.onerror = () => reject(new Error('تعذر قراءة الملف'));
     reader.readAsDataURL(file);
   });
+}
+
+export async function copyText(text) {
+  const value = String(text || '');
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch { }
+  const area = document.createElement('textarea');
+  area.value = value;
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  let done = false;
+  try { done = document.execCommand('copy'); } catch { }
+  area.remove();
+  return done;
 }

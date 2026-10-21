@@ -256,34 +256,75 @@ function openPayment() {
       }));
       wrap.querySelector('[data-cancel]').addEventListener('click', close);
       wrap.querySelector('#confirmPay').addEventListener('click', async () => {
+        const paid = Number(amount.value) || 0;
         try {
-          const res = await api('POST', '/api/sales', {
-            items: state.cart.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_price: i.unit_price, discount: i.discount })),
-            customer_id: state.cartMeta.customer_id || null,
-            pos_mode: state.cartMeta.pos_mode,
-            payment_method: method,
-            paid: Number(amount.value) || 0,
-            discount: Number(state.cartMeta.discount) || 0,
-            tax: Number(state.cartMeta.tax) || 0,
-            shift_id: state.shift ? state.shift.id : null,
-          });
+          const res = await submitSale(method, paid, false);
           close();
-          state.cart = [];
-          const invId = res.invoice.id;
-          await Promise.all([
-            api('GET', '/api/products?page_size=300').then((r) => { products = r.rows; }).catch(() => {}),
-            api('GET', '/api/shifts/current').then((r) => { state.shift = r.shift; renderShiftBadge(); }).catch(() => {}),
-          ]);
-          renderCart();
-          renderGrid('');
-          toast(`تم إنشاء الفاتورة ${res.invoice.invoice_no}`, 'success');
-          if (confirm('طباعة الفاتورة الآن؟')) openPrint(`/api/print/thermal/${invId}?width=${state.settings.printer_type === 'thermal58' ? 58 : 80}`);
+          await afterSale(res);
         } catch (err) {
+          if (err.code === 'CREDIT_LIMIT') {
+            creditLimitWarning(err.details || {}, async () => {
+              try {
+                const res = await submitSale(method, paid, true);
+                close();
+                await afterSale(res);
+              } catch (e2) { toast(e2.message, 'error'); }
+            });
+            return;
+          }
           toast(err.message, 'error');
         }
       });
     },
   });
+}
+
+function submitSale(method, paid, force) {
+  return api('POST', '/api/sales', {
+    items: state.cart.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_price: i.unit_price, discount: i.discount })),
+    customer_id: state.cartMeta.customer_id || null,
+    pos_mode: state.cartMeta.pos_mode,
+    payment_method: method,
+    paid,
+    discount: Number(state.cartMeta.discount) || 0,
+    tax: Number(state.cartMeta.tax) || 0,
+    shift_id: state.shift ? state.shift.id : null,
+    ...(force ? { force_credit_limit: true } : {}),
+  });
+}
+
+function creditLimitWarning(details, onConfirm) {
+  modal({
+    title: 'تجاوز حد ائتمان العميل',
+    size: 'max-w-sm',
+    body: `
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-2">
+        <div class="flex justify-between"><span class="text-slate-500">العميل</span><b>${esc(details.customer || '-')}</b></div>
+        <div class="flex justify-between"><span class="text-slate-500">حد الائتمان</span><b>${money(details.limit || 0)}</b></div>
+        <div class="flex justify-between"><span class="text-slate-500">الرصيد الحالي</span><b>${money(details.current || 0)}</b></div>
+        <div class="flex justify-between"><span class="text-slate-500">الرصيد بعد البيع</span><b class="text-rose-600">${money(details.projected || 0)}</b></div>
+        <div class="flex justify-between border-t border-amber-200 pt-2"><span class="text-slate-500">التجاوز</span><b class="text-rose-600">${money(details.over || 0)}</b></div>
+      </div>
+      <p class="text-xs text-slate-500 mt-3">يمكن المتابعة فقط من قبل من يملك صلاحية إدارة الفواتير، وسيُسجَّل التجاوز في سجل النشاط.</p>`,
+    footer: `<button data-cancel class="btn btn-ghost">إلغاء البيع</button><button id="clOk" class="btn btn-warning">متابعة رغم التجاوز</button>`,
+    onMount(wrap, close) {
+      wrap.querySelector('[data-cancel]').addEventListener('click', close);
+      wrap.querySelector('#clOk').addEventListener('click', () => { close(); onConfirm(); });
+    },
+  });
+}
+
+async function afterSale(res) {
+  state.cart = [];
+  const invId = res.invoice.id;
+  await Promise.all([
+    api('GET', '/api/products?page_size=300').then((r) => { products = r.rows; }).catch(() => {}),
+    api('GET', '/api/shifts/current').then((r) => { state.shift = r.shift; renderShiftBadge(); }).catch(() => {}),
+  ]);
+  renderCart();
+  renderGrid('');
+  toast(`تم إنشاء الفاتورة ${res.invoice.invoice_no}`, 'success');
+  if (confirm('طباعة الفاتورة الآن؟')) openPrint(`/api/print/thermal/${invId}?width=${state.settings.printer_type === 'thermal58' ? 58 : 80}`);
 }
 
 function renderShiftBadge() {

@@ -6,7 +6,107 @@ const { pick, buildInsert, buildUpdate, list } = require('../core/crud');
 const EXPENSE_FIELDS = ['category', 'description', 'amount', 'payment_method', 'date'];
 const ACCOUNT_FIELDS = ['code', 'name', 'type', 'parent_id'];
 
+function buildIncomeStatement(query = {}) {
+  const from = query.from || "date('now','localtime','-29 days')";
+  const to = query.to || "date('now','localtime')";
+  const useFrom = query.from ? 'date(?)' : from;
+  const useTo = query.to ? 'date(?)' : to;
+  const params = [];
+  if (query.from) params.push(query.from);
+  if (query.to) params.push(query.to);
+  const range = `date(created_at) BETWEEN ${useFrom} AND ${useTo}`;
+  const invRange = range.replace(/created_at/g, 'i.created_at');
+
+  const sales = db.get(
+    `SELECT COALESCE(SUM(total),0) AS total, COUNT(*) AS count FROM invoices WHERE type='sale' AND ${range}`, params
+  );
+  const returns = db.get(
+    `SELECT COALESCE(SUM(total),0) AS total, COUNT(*) AS count FROM invoices WHERE type='return_sale' AND ${range}`, params
+  );
+  const cogs = db.get(
+    `SELECT COALESCE(SUM(it.cost_price * it.qty),0) AS total FROM invoice_items it
+     JOIN invoices i ON i.id = it.invoice_id WHERE i.type='sale' AND ${invRange}`, params
+  );
+  const cogsReturns = db.get(
+    `SELECT COALESCE(SUM(it.cost_price * it.qty),0) AS total FROM invoice_items it
+     JOIN invoices i ON i.id = it.invoice_id WHERE i.type='return_sale' AND ${invRange}`, params
+  );
+  const expenses = db.get(`SELECT COALESCE(SUM(amount),0) AS total FROM expenses WHERE ${range}`, params);
+  const expensesByCategory = db.all(
+    `SELECT category, COALESCE(SUM(amount),0) AS amount, COUNT(*) AS count FROM expenses
+     WHERE ${range} GROUP BY category ORDER BY amount DESC`, params
+  );
+  const otherIncome = db.get(
+    `SELECT COALESCE(SUM(amount),0) AS total FROM treasury WHERE direction='in'
+     AND source NOT IN ('sale_cash','sale_card','customer_payment','installment_payment')
+     AND ${range}`, params
+  );
+  const otherExpense = db.get(
+    `SELECT COALESCE(SUM(amount),0) AS total FROM treasury WHERE direction='out'
+     AND source NOT IN ('purchase','sale_cash','sale_card','expense','supplier_payment','return_sale')
+     AND ${range}`, params
+  );
+  const purchases = db.get(
+    `SELECT COALESCE(SUM(total),0) AS total FROM invoices WHERE type='purchase' AND ${range}`, params
+  );
+  const purchaseReturns = db.get(
+    `SELECT COALESCE(SUM(total),0) AS total FROM invoices WHERE type='return_purchase' AND ${range}`, params
+  );
+
+  const revenue = Number(sales.total) - Number(returns.total);
+  const netCogs = Number(cogs.total) - Number(cogsReturns.total);
+  const grossProfit = revenue - netCogs;
+  const totalExpenses = Number(expenses.total) + Number(otherExpense.total);
+  const netProfit = grossProfit - totalExpenses + Number(otherIncome.total);
+  const salesCount = Number(sales.count) || 0;
+
+  const byPayment = db.all(
+    `SELECT payment_method, COALESCE(SUM(total),0) AS total, COUNT(*) AS count FROM invoices
+     WHERE type='sale' AND ${range} GROUP BY payment_method`, params
+  );
+  const daily = db.all(
+    `SELECT date(created_at) AS day, COALESCE(SUM(total),0) AS total, COUNT(*) AS count
+     FROM invoices WHERE type='sale' AND ${range} GROUP BY day ORDER BY day`, params
+  );
+  const topProducts = db.all(
+    `SELECT it.name, COALESCE(SUM(it.qty),0) AS qty,
+            COALESCE(SUM(it.total),0) AS revenue,
+            COALESCE(SUM(it.cost_price * it.qty),0) AS cost
+     FROM invoice_items it JOIN invoices i ON i.id = it.invoice_id
+     WHERE i.type='sale' AND ${invRange}
+     GROUP BY it.name ORDER BY revenue DESC LIMIT 10`, params
+  ).map((p) => ({
+    ...p,
+    profit: Math.round((p.revenue - p.cost) * 100) / 100,
+    margin_pct: p.revenue ? Math.round(((p.revenue - p.cost) / p.revenue) * 10000) / 100 : 0,
+  }));
+
+  return {
+    period: { from: query.from || null, to: query.to || null },
+    sales_total: Number(sales.total),
+    sales_count: salesCount,
+    returns_total: Number(returns.total),
+    revenue,
+    cogs: netCogs,
+    gross_profit: grossProfit,
+    gross_margin: revenue ? Math.round((grossProfit / revenue) * 10000) / 100 : 0,
+    expenses_total: totalExpenses,
+    expenses_by_category: expensesByCategory,
+    other_income: Number(otherIncome.total),
+    other_expense: Number(otherExpense.total),
+    purchases_total: Number(purchases.total),
+    purchase_returns_total: Number(purchaseReturns.total),
+    net_profit: netProfit,
+    net_margin: revenue ? Math.round((netProfit / revenue) * 10000) / 100 : 0,
+    avg_ticket: salesCount ? Math.round((revenue / salesCount) * 100) / 100 : 0,
+    by_payment: byPayment,
+    daily,
+    top_products: topProducts,
+  };
+}
+
 module.exports = {
+  buildIncomeStatement,
   register(router) {
     router.get('/api/accounts', (ctx) => {
       const rows = db.all('SELECT * FROM accounts ORDER BY code');
@@ -257,6 +357,10 @@ module.exports = {
         cogs: cogs.total, expenses: expenses.total, revenue, gross_profit: grossProfit, net_profit: netProfit,
         daily, by_payment: byPayment,
       });
+    });
+
+    router.get('/api/reports/income-statement', (ctx) => {
+      sendJson(ctx.res, 200, buildIncomeStatement(ctx.query));
     });
 
     router.get('/api/reports/trial-balance', (ctx) => {

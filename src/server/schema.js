@@ -313,6 +313,8 @@ const DEFAULT_SETTINGS = [
   ["invoice_prefix_sale", "INV", "financial"],
   ["invoice_prefix_purchase", "PUR", "financial"],
   ["shift_required", "0", "pos"],
+  ["credit_limit_mode", "warn", "financial"],
+  ["statement_period_days", "90", "financial"],
 ];
 
 const INDUSTRY_PRESETS = {
