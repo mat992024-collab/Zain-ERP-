@@ -572,6 +572,23 @@ const { start } = require('../src/server/index.js');
   r = await call('GET', '/api/search?q=' + encodeURIComponent('لابتوب'), null, cashierToken);
   ok('search allowed for cashier', r.status === 200, String(r.status));
 
+  const pngDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+  r = await call('POST', `/api/products/${pid}/image`, { data_url: pngDataUrl }, token);
+  ok('upload product image', r.status === 200 && String(r.data.product.image).startsWith('/images/'), JSON.stringify(r.data));
+  const imageUrl = r.data.product.image;
+  const imageRes = await raw(imageUrl);
+  ok('product image is served', imageRes.status === 200 && String(imageRes.headers.get('content-type')).startsWith('image/'), String(imageRes.status));
+  r = await call('GET', '/api/products', null, token);
+  ok('product list exposes image url', r.data.rows.find((x) => x.id === pid).image === imageUrl, JSON.stringify(r.data.rows.find((x) => x.id === pid).image));
+  r = await call('POST', `/api/products/${pid}/image`, { data_url: 'data:text/html;base64,PHNjcmlwdD4=' }, token);
+  ok('invalid image rejected', r.status === 400, String(r.status));
+  r = await call('POST', `/api/products/${pid}/image`, { data_url: pngDataUrl }, cashierToken);
+  ok('product image requires permission', r.status === 403, String(r.status));
+  r = await call('DELETE', `/api/products/${pid}/image`, null, token);
+  ok('delete product image', r.status === 200, String(r.status));
+  r = await raw(imageUrl);
+  ok('product image removed from disk', r.status === 404, String(r.status));
+
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

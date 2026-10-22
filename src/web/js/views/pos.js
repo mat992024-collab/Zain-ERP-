@@ -243,6 +243,7 @@ function renderGrid(term) {
   grid.innerHTML = list
     .map((p) => `
       <button data-id="${p.id}" class="card p-3 text-right hover:border-zain-400 hover:shadow-md transition-all ${p.quantity <= 0 ? 'opacity-60' : ''}">
+        ${p.image ? `<img src="${esc(p.image)}" alt="${esc(p.name)}" class="w-full h-20 object-cover rounded-lg mb-2 bg-slate-50" />` : ''}
         <div class="font-bold text-sm text-slate-800 line-clamp-2 h-10 overflow-hidden">${esc(p.name)}</div>
         <div class="text-[10px] text-slate-400 font-mono mt-1">${esc(p.barcode || p.part_number || '')}</div>
         <div class="flex items-center justify-between mt-2">

@@ -59,6 +59,11 @@ function createServer() {
     }
 
     if (!pathname.startsWith('/api/') && !pathname.startsWith('/print/')) {
+      if (pathname.startsWith('/images/')) {
+        if (serveStatic(res, db.IMAGES_DIR, pathname.slice('/images'.length))) return;
+        notFound(res);
+        return;
+      }
       if (serveStatic(res, WEB_DIR, pathname === '/' ? '/index.html' : pathname)) return;
       if (!path.extname(pathname)) {
         if (serveStatic(res, WEB_DIR, '/index.html')) return;

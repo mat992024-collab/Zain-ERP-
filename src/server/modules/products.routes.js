@@ -1,4 +1,7 @@
 const db = require('../db');
+const path = require('node:path');
+const fs = require('node:fs');
+const crypto = require('node:crypto');
 const { sendJson, HttpError } = require('../core/http');
 const { parseJsonFields, toBool, pick, buildInsert, buildUpdate, list } = require('../core/crud');
 
@@ -10,6 +13,7 @@ const FIELDS = [
 
 function normalizeProduct(data) {
   const out = pick(data, FIELDS);
+  delete out.image;
   if (out.units && typeof out.units !== 'string') out.units = JSON.stringify(out.units);
   for (const k of ['track_expiry', 'is_active']) {
     if (k in out) out[k] = toBool(out[k]) ? 1 : 0;
@@ -173,6 +177,46 @@ module.exports = {
       });
       db.logActivity(ctx.user.id, 'update', 'products', existing.id);
       sendJson(ctx.res, 200, { product: parseJsonFields(db.get('SELECT * FROM products WHERE id = ?', [existing.id]), ['units']) });
+    });
+
+    router.post('/api/products/:id/image', (ctx) => {
+      if (!ctx.can('inventory.write') && !ctx.can('products.write')) {
+        throw new HttpError(403, 'لا تملك صلاحية تعديل المنتجات');
+      }
+      const product = db.get('SELECT * FROM products WHERE id = ?', [ctx.params.id]);
+      if (!product) throw new HttpError(404, 'المنتج غير موجود');
+      const dataUrl = String((ctx.body || {}).data_url || '');
+      const match = /^data:image\/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+      if (!match) throw new HttpError(400, 'صيغة الصورة غير مدعومة');
+      const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
+      const buffer = Buffer.from(match[2], 'base64');
+      if (!buffer.length) throw new HttpError(400, 'الصورة فارغة');
+      if (buffer.length > 3 * 1024 * 1024) throw new HttpError(400, 'حجم الصورة كبير جداً');
+      fs.mkdirSync(db.IMAGES_DIR, { recursive: true });
+      if (product.image) {
+        try { fs.unlinkSync(path.join(db.IMAGES_DIR, path.basename(String(product.image)))); } catch { }
+      }
+      const file = `p${product.id}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+      fs.writeFileSync(path.join(db.IMAGES_DIR, file), buffer);
+      const url = `/images/${file}`;
+      db.run('UPDATE products SET image = ? WHERE id = ?', [url, product.id]);
+      db.logActivity(ctx.user.id, 'update', 'products', product.id, { image: url });
+      sendJson(ctx.res, 200, { product: { id: product.id, image: url }, bytes: buffer.length });
+    });
+
+    router.delete('/api/products/:id/image', (ctx) => {
+      if (!ctx.can('inventory.write') && !ctx.can('products.write')) {
+        throw new HttpError(403, 'لا تملك صلاحية تعديل المنتجات');
+      }
+      const product = db.get('SELECT * FROM products WHERE id = ?', [ctx.params.id]);
+      if (!product) throw new HttpError(404, 'المنتج غير موجود');
+      if (product.image) {
+        const file = path.basename(String(product.image));
+        try { fs.unlinkSync(path.join(db.IMAGES_DIR, file)); } catch { }
+      }
+      db.run('UPDATE products SET image = NULL WHERE id = ?', [product.id]);
+      db.logActivity(ctx.user.id, 'update', 'products', product.id, { image: null });
+      sendJson(ctx.res, 200, { ok: true });
     });
 
     router.post('/api/products/:id/adjust', (ctx) => {

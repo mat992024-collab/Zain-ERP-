@@ -6,6 +6,7 @@ const { SCHEMA, DEFAULT_SETTINGS, SYSTEM_ACCOUNTS } = require('./schema');
 
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 const DB_PATH = process.env.ZAIN_DB || path.join(DATA_DIR, 'zain.db');
+const IMAGES_DIR = path.join(path.dirname(DB_PATH), 'images');
 
 let db = null;
 
@@ -177,4 +178,5 @@ module.exports = {
   logActivity,
   DB_PATH,
   DATA_DIR,
+  IMAGES_DIR,
 };

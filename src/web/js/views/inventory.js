@@ -1,4 +1,4 @@
-import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, debounce, formToObject, downloadFile } from '../core.js';
+import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, debounce, formToObject, downloadFile, pickImageFile } from '../core.js';
 
 const BULK_FIELDS = ['name', 'barcode', 'part_number', 'author', 'category', 'brand', 'unit', 'cost_price', 'sale_price', 'wholesale_price', 'quantity', 'reorder_level', 'tax_rate', 'expiry_date', 'supplier_id', 'track_expiry', 'is_active', 'description'];
 
@@ -17,6 +17,7 @@ async function listView(c, { mode }) {
   let lowOnly = mode === 'inventory';
   if (state.pendingSearch && state.pendingSearch.view === 'inventory') {
     search = state.pendingSearch.q;
+    lowOnly = false;
     state.pendingSearch = null;
   }
   const categories = await api('GET', '/api/products/categories').then((r) => r.categories).catch(() => []);
@@ -64,7 +65,12 @@ async function listView(c, { mode }) {
     c.querySelector('#pBody').innerHTML = rows.length
       ? rows.map((p) => `
         <tr class="tr">
-          <td class="td"><div class="font-bold text-slate-800">${esc(p.name)}</div><div class="text-[11px] text-slate-400">${esc(p.author || p.part_number || '')}</div></td>
+          <td class="td">
+            <div class="flex items-center gap-2">
+              ${p.image ? `<img src="${esc(p.image)}" alt="${esc(p.name)}" class="w-9 h-9 rounded-lg object-cover border border-slate-200 shrink-0" />` : ''}
+              <div><div class="font-bold text-slate-800">${esc(p.name)}</div><div class="text-[11px] text-slate-400">${esc(p.author || p.part_number || '')}</div></div>
+            </div>
+          </td>
           <td class="td font-mono text-xs">${esc(p.barcode || '-')}</td>
           <td class="td"><span class="badge badge-info">${esc(p.category)}</span></td>
           <td class="td">${num(p.cost_price)}</td>
@@ -177,19 +183,66 @@ function productForm(product, { categories, suppliers, onSave }) {
           <label class="flex items-center gap-2 text-sm font-bold text-slate-600"><input type="checkbox" name="track_expiry" ${p.track_expiry ? 'checked' : ''} class="w-4 h-4 accent-zain-500" /> تتبع الصلاحية</label>
           <label class="flex items-center gap-2 text-sm font-bold text-slate-600"><input type="checkbox" name="is_active" ${p.is_active === undefined || p.is_active ? 'checked' : ''} class="w-4 h-4 accent-emerald-500" /> فعال</label>
         </div>
+        <div class="col-span-2">
+          ${field('صورة الصنف', `<div class="flex items-center gap-3">
+            <div id="pfImgBox" class="w-20 h-20 rounded-xl border border-slate-200 bg-slate-50 grid place-items-center overflow-hidden shrink-0">
+              ${p.image ? `<img src="${esc(p.image)}" alt="صورة الصنف" class="w-full h-full object-cover" />` : '<i class="bi bi-image text-slate-300 text-2xl"></i>'}
+            </div>
+            <div class="flex-1">
+              <input type="file" id="pfImage" accept="image/*" class="field text-xs" />
+              <input type="hidden" name="image" id="pfImageData" value="${esc(p.image || '')}" />
+              <p class="text-[11px] text-slate-400 mt-1">تُصغَّر الصورة تلقائياً قبل الحفظ (بحد أقصى 420 بكسل).</p>
+            </div>
+            <button type="button" id="pfImageClear" class="btn btn-ghost btn-sm shrink-0"><i class="bi bi-trash"></i> إزالة</button>
+          </div>`)}
+        </div>
         <div class="col-span-2">${field('ملاحظات', `<textarea name="description" class="field" rows="2">${esc(p.description || '')}</textarea>`)}</div>
       </form>`,
     footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="prodSave" class="btn btn-primary"><i class="bi bi-check2"></i> حفظ</button>`,
     onMount(wrap, close) {
       wrap.querySelector('[data-cancel]').addEventListener('click', close);
+      const imgBox = wrap.querySelector('#pfImgBox');
+      const imgData = wrap.querySelector('#pfImageData');
+      const paintImage = (src) => {
+        imgBox.innerHTML = src
+          ? `<img src="${src}" alt="صورة الصنف" class="w-full h-full object-cover" />`
+          : '<i class="bi bi-image text-slate-300 text-2xl"></i>';
+      };
+      wrap.querySelector('#pfImage').addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        try {
+          const dataUrl = await pickImageFile(file);
+          imgData.value = dataUrl;
+          paintImage(dataUrl);
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      });
+      wrap.querySelector('#pfImageClear').addEventListener('click', () => {
+        imgData.value = '';
+        wrap.querySelector('#pfImage').value = '';
+        paintImage('');
+      });
       wrap.querySelector('#prodSave').addEventListener('click', async () => {
         const form = wrap.querySelector('#prodForm');
         if (!form.reportValidity()) return;
         const data = formToObject(form);
         for (const k of ['cost_price', 'sale_price', 'wholesale_price', 'quantity', 'reorder_level']) data[k] = Number(data[k]) || 0;
+        const imageValue = imgData.value;
+        delete data.image;
         try {
+          let savedId = product ? product.id : null;
           if (product) await api('PUT', `/api/products/${product.id}`, data);
-          else await api('POST', '/api/products', data);
+          else {
+            const res = await api('POST', '/api/products', data);
+            savedId = res.product.id;
+          }
+          if (/^data:image\//.test(imageValue)) {
+            await api('POST', `/api/products/${savedId}/image`, { data_url: imageValue });
+          } else if (product && product.image && !imageValue) {
+            await api('DELETE', `/api/products/${savedId}/image`);
+          }
           toast('تم الحفظ', 'success');
           close();
           onSave && onSave();
