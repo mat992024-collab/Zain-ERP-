@@ -7,6 +7,7 @@ import { renderAccounting, renderShifts } from './views/accounting.js';
 import { renderAi, renderReports } from './views/ai.js';
 import { renderAdmin, openSettings } from './views/admin.js';
 import { renderReminders } from './views/reminders.js';
+import { renderActivity } from './views/activity.js';
 
 const NAV = [
   { key: 'dashboard', name: 'لوحة التحكم', icon: 'bi-speedometer2', perm: null, route: 'dashboard' },
@@ -21,6 +22,7 @@ const NAV = [
   { key: 'ai', name: 'الذكاء الاصطناعي', icon: 'bi-cpu', perm: 'ai.use', module: 'ai', route: 'ai' },
   { key: 'reports', name: 'التقارير', icon: 'bi-bar-chart-line', perm: 'accounting.write', module: 'reports', route: 'reports' },
   { key: 'reminders', name: 'التذكيرات', icon: 'bi-megaphone', perm: 'reminders.view', module: 'reminders', route: 'reminders' },
+  { key: 'activity', name: 'سجل النشاط', icon: 'bi-clock-history', perm: 'activity.view', route: 'activity' },
   { key: 'admin', name: 'الإدارة والصلاحيات', icon: 'bi-shield-lock', perm: 'admin.users', module: 'admin', route: 'admin' },
 ];
 
@@ -38,6 +40,7 @@ const ROUTES = {
   ai: renderAi,
   reports: renderReports,
   reminders: renderReminders,
+  activity: renderActivity,
   admin: renderAdmin,
 };
 

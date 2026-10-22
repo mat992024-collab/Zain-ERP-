@@ -1,5 +1,6 @@
 const db = require('../db');
-const { toCsv, sendCsv, dateFilter, requirePerm } = require('../core/csv');
+const { toCsv, sendCsv, dateFilter } = require('../core/csv');
+const { HttpError } = require('../core/http');
 
 const ENTITIES = {
   sales: {
@@ -221,6 +222,7 @@ const ENTITIES = {
   },
   activity: {
     perm: 'admin.users',
+    perms: ['activity.view', 'admin.users'],
     label: 'سجل النشاط',
     build(query) {
       const f = dateFilter(query, 'l.created_at');
@@ -257,7 +259,8 @@ module.exports = {
         ctx.res.end(JSON.stringify({ error: 'نوع التصدير غير معروف' }));
         return;
       }
-      requirePerm(ctx, entity.perm);
+      const perms = entity.perms || [entity.perm];
+      if (!perms.some((p) => ctx.can(p))) throw new HttpError(403, 'لا تملك صلاحية تنفيذ هذه العملية');
       const { sql, params, columns } = entity.build(ctx.query);
       const rows = db.all(sql, params);
       db.logActivity(ctx.user.id, 'export', ctx.params.entity, null, { rows: rows.length });

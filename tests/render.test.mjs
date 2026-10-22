@@ -80,6 +80,7 @@ async function main() {
   const acc = await import('../src/web/js/views/accounting.js');
   const ai = await import('../src/web/js/views/ai.js');
   const adm = await import('../src/web/js/views/admin.js');
+  const act = await import('../src/web/js/views/activity.js');
 
   const jobs = [
     ['pos.render', render],
@@ -94,6 +95,7 @@ async function main() {
     ['ai.renderAi', ai.renderAi],
     ['ai.renderReports', ai.renderReports],
     ['admin.renderAdmin', adm.renderAdmin],
+    ['activity.renderActivity', act.renderActivity],
   ];
 
   let pass = 0, fail = 0;

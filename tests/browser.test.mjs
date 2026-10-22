@@ -184,6 +184,7 @@ async function main() {
   await sleep(1200);
   const gridCards = await evalJs(`document.querySelectorAll('#productGrid [data-id]').length`);
   check('pos product grid populated', gridCards > 0, 'cards=' + gridCards);
+  await waitFor(`!!document.querySelector('#productGrid [data-id]')`, 40);
   await evalJs(`document.querySelector('#productGrid [data-id]').click()`);
   await sleep(400);
   const cartRows = await evalJs(`document.querySelectorAll('#cartItems [data-qty]').length`);
@@ -245,6 +246,7 @@ async function main() {
   await evalJs(`location.hash = '#/pos'`);
   await sleep(1200);
   await evalJs(`(function(){const s=document.getElementById('posCustomer');s.value='${customerId}';s.dispatchEvent(new Event('change'));})()`);
+  await waitFor(`!!document.querySelector('#productGrid [data-id]')`, 40);
   await evalJs(`document.querySelector('#productGrid [data-id]').click()`);
   await sleep(400);
   await evalJs(`document.getElementById('payBtn').click()`);
@@ -319,6 +321,7 @@ async function main() {
 
   await evalJs(`location.hash = '#/pos'`);
   await sleep(1800);
+  await waitFor(`!!document.querySelector('#productGrid [data-id]')`, 40);
   await evalJs(`document.querySelector('#productGrid [data-id]').click()`);
   await sleep(400);
   await evalJs(`document.getElementById('payBtn').click()`);
@@ -549,7 +552,7 @@ async function main() {
   await waitFor(`!!document.getElementById('posSearch')`);
   await sleep(1200);
   await evalJs(`(function(){const s=document.getElementById('posSearch');s.value='UITEST1';s.dispatchEvent(new Event('input'));})()`);
-  await sleep(900);
+  await waitFor(`!!document.querySelector('#productGrid [data-id]')`, 40);
   await evalJs(`document.querySelector('#productGrid [data-id]').click()`);
   await sleep(600);
   const taxField = await evalJs(`(function(){const el=document.getElementById('posTax');return el?{ro:el.readOnly,v:el.value}:null;})()`);
@@ -574,6 +577,28 @@ async function main() {
   check('tax report has print button', taxPrintBtn === true);
   const taxApi = await evalJs(`fetch('/api/reports/tax',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>({o:d.output_tax,n:d.net_payable,rows:d.rows.length}))`, true);
   check('tax report api returns totals', taxApi && typeof taxApi.o === 'number' && taxApi.rows >= 0, JSON.stringify(taxApi));
+
+  phase = 'activity-log';
+  await nav(BASE);
+  await waitFor(`document.querySelectorAll('#nav [data-nav]').length > 0`);
+  await sleep(1000);
+  const actNav = await evalJs(`!!document.querySelector('#nav [data-nav="activity"]')`);
+  check('activity nav link present', actNav === true);
+  await evalJs(`location.hash = '#/activity'`);
+  await waitFor(`!!document.getElementById('acRows') && document.querySelectorAll('#acRows tr').length > 0`);
+  await sleep(700);
+  const actRows = await evalJs(`document.querySelectorAll('#acRows tr').length`);
+  check('activity view lists log rows', actRows > 0, 'rows=' + actRows);
+  const actOpts = await evalJs(`document.getElementById('acAction').options.length`);
+  check('activity view populates action filter', actOpts > 1, 'options=' + actOpts);
+  const actCount = await evalJs(`document.getElementById('acCount').textContent`);
+  check('activity view shows total count', /إجمالي/.test(actCount), actCount);
+  await evalJs(`(function(){const s=document.getElementById('acAction');s.value='sale';s.dispatchEvent(new Event('change'));})()`);
+  await sleep(900);
+  const saleOnly = await evalJs(`(function(){const rows=[...document.querySelectorAll('#acRows tr')];return rows.length?rows.every(function(r){return /بيع/.test(r.innerText);}):true;})()`);
+  check('activity view filters by action', saleOnly === true, 'rows=' + actRows);
+  const actApi = await evalJs(`fetch('/api/activity',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>({t:d.total,a:d.by_action.length}))`, true);
+  check('activity api returns totals', actApi && actApi.t > 0 && actApi.a > 0, JSON.stringify(actApi));
 
   phase = 'offline';
   const external = [...new Set(requests)].filter((u) => !u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:') && !u.startsWith('about:'));

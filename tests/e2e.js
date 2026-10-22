@@ -529,6 +529,19 @@ const { start } = require('../src/server/index.js');
   r = await call('GET', '/api/reports/income-statement', null, token);
   ok('income statement revenue excludes vat', r.status === 200, String(r.status));
 
+  r = await call('GET', '/api/activity', null, token);
+  ok('activity log lists entries', r.status === 200 && r.data.rows.length > 0 && r.data.total > 0, JSON.stringify({ rows: r.data.rows.length, total: r.data.total }));
+  ok('activity log groups by action', r.data.by_action.length > 0 && r.data.by_action[0].count > 0, JSON.stringify(r.data.by_action.slice(0, 2)));
+  ok('activity log joins user', r.data.rows.some((x) => x.username), JSON.stringify(r.data.rows[0] && r.data.rows[0].username));
+  r = await call('GET', '/api/activity?action=sale', null, token);
+  ok('activity log filters by action', r.status === 200 && r.data.rows.every((x) => x.action === 'sale'), String(r.data.rows.length));
+  r = await call('GET', '/api/activity?from=2000-01-01&to=2000-01-02', null, token);
+  ok('activity log respects date range', r.status === 200 && r.data.rows.length === 0, String(r.data.rows.length));
+  r = await call('GET', '/api/activity', null, cashierToken);
+  ok('activity log requires permission (403)', r.status === 403, String(r.status));
+  r = await call('GET', '/api/export/activity', null, token);
+  ok('activity export CSV', r.status === 200 && String(r.data).includes('الإجراء'), String(r.status));
+
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
