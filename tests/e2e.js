@@ -1,5 +1,6 @@
 process.env.ZAIN_DB = require('node:path').join(__dirname, '..', 'data', 'e2e.db');
 const fs = require('node:fs');
+const path = require('node:path');
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(process.env.ZAIN_DB + s); } catch {} }
 
 const { start } = require('../src/server/index.js');
@@ -607,6 +608,21 @@ const { readZip } = require('../src/server/core/zip');
   r = await raw(imageUrl);
   ok('product image removed from disk', r.status === 404, String(r.status));
 
-  server.close();  console.log(`\n${pass} passed, ${fail} failed`);
+  r = await call('POST', '/api/products', { name: 'صنف مؤقت بصورة', category: 'إلكترونيات', barcode: 'TMP-IMG', sale_price: 1000, cost_price: 500, quantity: 1, reorder_level: 0 }, token);
+  const tmpPid = r.data.product.id;
+  r = await call('POST', `/api/products/${tmpPid}/image`, { data_url: pngDataUrl }, token);
+  const tmpImageUrl = r.data.product.image;
+  const tmpImageFile = tmpImageUrl.split('/').pop();
+  ok('temporary product image uploaded', r.status === 200 && !!tmpImageUrl, JSON.stringify(r.data));
+  r = await call('DELETE', `/api/products/${tmpPid}`, null, token);
+  ok('temporary product deleted', r.status === 200 && r.data.ok === true, JSON.stringify(r.data));
+  const tmpImgRes = await raw(tmpImageUrl);
+  ok('deleted product image file removed from disk', tmpImgRes.status === 404, String(tmpImgRes.status));
+  r = await call('GET', '/api/products', null, token);
+  ok('deleted product removed from list', !r.data.rows.some((x) => x.id === tmpPid), 'found=' + r.data.rows.some((x) => x.id === tmpPid));
+  ok('deleted product image file deleted', !fs.existsSync(path.join(path.dirname(process.env.ZAIN_DB), 'images', tmpImageFile)), tmpImageFile);
+
+  server.close();
+  console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FAIL', e); process.exit(1); });

@@ -47,7 +47,7 @@
 ## الاختبارات
 ```
 npm test              # يشغّل الثلاث مجموعات بالترتيب
-npm run test:api      # اختبارات الـ API (245 فحصاً)
+npm run test:api      # اختبارات الـ API (250 فحصاً)
 npm run test:render   # رسم كل الشاشات في بيئة DOM وهمية (14 فحصاً)
 npm run test:ui       # متصفح Chrome/Edge حقيقي عبر CDP (116 فحصاً)
 ```

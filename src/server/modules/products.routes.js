@@ -253,6 +253,9 @@ module.exports = {
         return;
       }
       db.run('DELETE FROM products WHERE id = ?', [product.id]);
+      if (product.image) {
+        try { fs.unlinkSync(path.join(db.IMAGES_DIR, path.basename(String(product.image)))); } catch { }
+      }
       db.logActivity(ctx.user.id, 'delete', 'products', product.id);
       sendJson(ctx.res, 200, { ok: true });
     });
