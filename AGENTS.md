@@ -16,6 +16,7 @@ npm run test:render    # tests/render.test.mjs   (14 فحصاً)
 npm run test:ui        # tests/browser.test.mjs  (139 فحصاً)
 npm run seed           # بيانات تجريبية
 npm run reset          # تصفير القاعدة
+npm run doctor         # فحص البيئة والقاعدة والأجهزة (0 أخطاء = جاهز)
 ```
 
 ## قواعد المشروع
@@ -39,6 +40,7 @@ src/launcher.js              مشغّل التطبيق (يفتح المتصفح 
 src/server/index.js          الراوتر + تقديم الملفات الثابتة
 src/server/schema.js         الجداول + DEFAULT_SETTINGS + INDUSTRY_PRESETS + SYSTEM_ACCOUNTS
 src/server/db.js             الاتصال + bootstrap (admin/admin)
+src/server/doctor.js         فحص الجاهزية (بيئة/قاعدة/نسخ/مساحة/منفذ) — npm run doctor
 src/server/core/             http, auth, crud, ledger, code128, csv, zip, jobs (نسخ تلقائي/تذكير/جدولة/أقساط متأخرة)
 src/server/modules/          20 وحدة مسارات (statements للكشوف, activity لسجل النشاط, search للبحث السريع, scheduled للفواتير المجدولة)
 src/web/index.html           الصدفة (login + shell + nav + content)
@@ -47,6 +49,7 @@ src/web/js/main.js           bootstrap, hash-router, NAV, dashboard, وردية,
 src/web/js/views/            pos, inventory, contacts, sales, accounting, ai, admin, activity, search
 src/web/styles.css           مصدر Tailwind (يبني assets/app.css)
 tests/                       e2e.js, render.test.mjs, browser.test.mjs
+docs/UAT.md                  دليل القبول اليدوي (أجهزة/طباعة/باركود/بدون إنترنت)
 ```
 
 ## قبل أي commit
