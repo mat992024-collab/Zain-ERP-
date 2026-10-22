@@ -72,6 +72,7 @@ export async function renderReports(c) {
       <button data-rtab="sales" class="btn btn-primary"><i class="bi bi-graph-up"></i> المبيعات والأرباح</button>
       <button data-rtab="inventory" class="btn btn-ghost"><i class="bi bi-box-seam"></i> تقرير المخزون</button>
       <button data-rtab="tax" class="btn btn-ghost"><i class="bi bi-percent"></i> تقرير الضريبة</button>
+      <button data-rtab="analysis" class="btn btn-ghost"><i class="bi bi-trophy"></i> تحليل المبيعات</button>
     </div>
     <div id="repPane"></div>`;
   const pane = () => c.querySelector('#repPane');
@@ -80,7 +81,7 @@ export async function renderReports(c) {
     b.className = 'btn btn-primary';
     open(b.dataset.rtab);
   }));
-  const open = (key) => (key === 'inventory' ? inventory(pane()) : key === 'tax' ? taxReport(pane()) : sales(pane()));
+  const open = (key) => (key === 'inventory' ? inventory(pane()) : key === 'tax' ? taxReport(pane()) : key === 'analysis' ? analysis(pane()) : sales(pane()));
   sales(pane());
 }
 
@@ -222,4 +223,58 @@ async function taxReport(p) {
     </div>`;
 
   p.querySelector('#taxPrint').addEventListener('click', () => openPrint('/api/print/tax'));
+}
+
+async function analysis(p) {
+  const data = await api('GET', '/api/reports/sales-analysis');
+  const prodRows = data.products.map((r) => `
+    <tr class="tr">
+      <td class="td font-bold">${esc(r.name)}</td>
+      <td class="td">${num(r.qty)}</td>
+      <td class="td">${num(r.invoices)}</td>
+      <td class="td font-bold text-zain-700">${money(r.revenue, '')}</td>
+      <td class="td">${money(r.cost, '')}</td>
+      <td class="td text-emerald-600 font-bold">${money(r.profit, '')}</td>
+      <td class="td text-xs">${num(r.margin)}%</td>
+    </tr>`).join('');
+  const custRows = data.customers.map((r) => `
+    <tr class="tr">
+      <td class="td font-bold">${esc(r.name)}</td>
+      <td class="td text-xs">${esc(r.phone || '-')}</td>
+      <td class="td">${num(r.invoices)}</td>
+      <td class="td font-bold text-zain-700">${money(r.total, '')}</td>
+      <td class="td text-emerald-600">${money(r.paid, '')}</td>
+      <td class="td ${Number(r.due) > 0 ? 'text-rose-600 font-bold' : ''}">${money(r.due, '')}</td>
+    </tr>`).join('');
+
+  p.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-cash-coin"></i></div><div><div class="kpi-value">${money(data.totals.revenue)}</div><div class="kpi-label">صافي المبيعات</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-receipt"></i></div><div><div class="kpi-value">${num(data.totals.invoices)}</div><div class="kpi-label">عدد الفواتير</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-indigo-100 text-indigo-700"><i class="bi bi-calculator"></i></div><div><div class="kpi-value">${money(data.totals.avg_ticket)}</div><div class="kpi-label">متوسط الفاتورة</div></div></div>
+      <div class="kpi"><div class="kpi-icon bg-amber-100 text-amber-700"><i class="bi bi-graph-up-arrow"></i></div><div><div class="kpi-value">${money(data.totals.profit)}</div><div class="kpi-label">الربح الإجمالي</div></div></div>
+    </div>
+
+    <div class="grid grid-cols-12 gap-4">
+      <div class="col-span-7 card">
+        <div class="p-4 border-b border-slate-100 font-black flex items-center justify-between">
+          <span><i class="bi bi-trophy text-zain-600"></i> الأصناف الأكثر مبيعاً</span>
+          <button id="anaPrint" class="btn btn-primary btn-sm"><i class="bi bi-printer"></i> طباعة التقرير</button>
+        </div>
+        <div class="overflow-auto max-h-[56vh]"><table class="w-full">
+          <thead><tr><th class="th">الصنف</th><th class="th">الكمية</th><th class="th">الفواتير</th><th class="th">المبيعات</th><th class="th">التكلفة</th><th class="th">الربح</th><th class="th">الهامش</th></tr></thead>
+          <tbody>${prodRows || `<tr><td colspan="7" class="td text-center text-slate-400 py-8">لا توجد مبيعات</td></tr>`}</tbody>
+        </table></div>
+      </div>
+
+      <div class="col-span-5 card">
+        <div class="p-4 border-b border-slate-100 font-black"><i class="bi bi-people text-zain-600"></i> المبيعات حسب العميل</div>
+        <div class="overflow-auto max-h-[56vh]"><table class="w-full">
+          <thead><tr><th class="th">العميل</th><th class="th">الفواتير</th><th class="th">الإجمالي</th><th class="th">المتبقي</th></tr></thead>
+          <tbody>${custRows || `<tr><td colspan="4" class="td text-center text-slate-400 py-8">لا يوجد عملاء</td></tr>`}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+
+  p.querySelector('#anaPrint').addEventListener('click', () => openPrint('/api/print/sales-analysis'));
 }

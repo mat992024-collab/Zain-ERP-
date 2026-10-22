@@ -600,6 +600,21 @@ async function main() {
   const actApi = await evalJs(`fetch('/api/activity',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>({t:d.total,a:d.by_action.length}))`, true);
   check('activity api returns totals', actApi && actApi.t > 0 && actApi.a > 0, JSON.stringify(actApi));
 
+  phase = 'sales-analysis';
+  await evalJs(`location.hash = '#/reports'`);
+  await sleep(1500);
+  await evalJs(`document.querySelector('[data-rtab="analysis"]').click()`);
+  await waitFor(`!!document.getElementById('anaPrint')`);
+  await sleep(900);
+  const anaKpis = await evalJs(`document.querySelectorAll('#repPane .kpi').length`);
+  check('sales analysis shows kpis', anaKpis === 4, 'kpis=' + anaKpis);
+  const anaText = await evalJs(`document.getElementById('repPane').innerText`);
+  check('sales analysis lists top products', /لابتوب|صنف/.test(anaText), anaText.slice(0, 60).replace(/\n/g, ' '));
+  const anaApi = await evalJs(`fetch('/api/reports/sales-analysis',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>({r:d.totals.revenue,p:d.products.length,c:d.customers.length}))`, true);
+  check('sales analysis api returns ranking', anaApi && anaApi.r >= 0 && anaApi.p >= 0 && anaApi.c >= 0, JSON.stringify(anaApi));
+  const anaPrintHtml = await evalJs(`fetch('/api/print/sales-analysis',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.text())`, true);
+  check('sales analysis print contains header', anaPrintHtml.includes('تحليل المبيعات'), 'len=' + anaPrintHtml.length);
+
   phase = 'offline';
   const external = [...new Set(requests)].filter((u) => !u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:') && !u.startsWith('about:'));
   check('no external network requests (works offline)', external.length === 0, external.join(' , '));

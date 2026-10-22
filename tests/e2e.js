@@ -529,6 +529,19 @@ const { start } = require('../src/server/index.js');
   r = await call('GET', '/api/reports/income-statement', null, token);
   ok('income statement revenue excludes vat', r.status === 200, String(r.status));
 
+  r = await call('GET', '/api/reports/sales-analysis', null, token);
+  const ana = r.data;
+  ok('sales analysis returns totals', r.status === 200 && ana.totals.revenue > 0 && ana.totals.invoices > 0, JSON.stringify(ana.totals));
+  ok('sales analysis ranks products', ana.products.length > 0 && ana.products[0].revenue > 0 && ana.products[0].qty > 0, JSON.stringify(ana.products[0]));
+  ok('sales analysis ranks customers', ana.customers.length > 0 && ana.customers[0].total > 0, JSON.stringify(ana.customers[0]));
+  const anaRev = Math.round(ana.products.reduce((s, p) => s + p.revenue, 0) * 100) / 100;
+  ok('sales analysis computes product profit', Math.abs(ana.totals.profit - (anaRev - ana.totals.cost)) < 0.02, JSON.stringify({ profit: ana.totals.profit, cost: ana.totals.cost }));
+  ok('sales analysis daily series', Array.isArray(ana.daily), String(typeof ana.daily));
+  r = await call('GET', '/api/reports/sales-analysis?from=2000-01-01&to=2000-01-02', null, token);
+  ok('sales analysis respects range', r.status === 200 && r.data.totals.revenue === 0 && r.data.products.length === 0, JSON.stringify(r.data.totals));
+  r = await call('GET', '/api/print/sales-analysis', null, token);
+  ok('sales analysis print HTML', r.status === 200 && String(r.data).includes('تحليل المبيعات') && String(r.data).includes('الأصناف الأكثر مبيعاً'), String(r.status));
+
   r = await call('GET', '/api/activity', null, token);
   ok('activity log lists entries', r.status === 200 && r.data.rows.length > 0 && r.data.total > 0, JSON.stringify({ rows: r.data.rows.length, total: r.data.total }));
   ok('activity log groups by action', r.data.by_action.length > 0 && r.data.by_action[0].count > 0, JSON.stringify(r.data.by_action.slice(0, 2)));

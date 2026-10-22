@@ -604,6 +604,82 @@ module.exports = {
       sendText(ctx.res, 200, htmlDoc('تقرير الضريبة', A4_CSS + tpl.extraCss(settings, true), body), 'text/html; charset=utf-8');
     });
 
+    router.get('/api/print/sales-analysis', (ctx) => {
+      const data = accounting.buildSalesAnalysis(ctx.query);
+      const settings = db.getSettings();
+      const cur = settings.currency_symbol || 'د.ع';
+      const prodRows = data.products.map((r) => `
+        <tr>
+          <td>${esc(r.name)}</td>
+          <td style="text-align:left">${r.qty}</td>
+          <td style="text-align:left">${r.invoices}</td>
+          <td style="text-align:left">${money(r.revenue, '')}</td>
+          <td style="text-align:left">${money(r.cost, '')}</td>
+          <td style="text-align:left;font-weight:bold">${money(r.profit, '')}</td>
+          <td style="text-align:left">${r.margin}%</td>
+        </tr>`).join('');
+      const custRows = data.customers.map((r) => `
+        <tr>
+          <td>${esc(r.name)}</td>
+          <td style="font-family:monospace;font-size:11px">${esc(r.phone || '')}</td>
+          <td style="text-align:left">${r.invoices}</td>
+          <td style="text-align:left;font-weight:bold">${money(r.total, '')}</td>
+          <td style="text-align:left">${money(r.paid, '')}</td>
+          <td style="text-align:left">${money(r.due, '')}</td>
+        </tr>`).join('');
+      const dayRows = data.daily.map((d) => `
+        <tr>
+          <td>${esc(d.day)}</td>
+          <td style="text-align:left">${d.invoices}</td>
+          <td style="text-align:left;font-weight:bold">${money(d.total, '')}</td>
+        </tr>`).join('');
+      const body = `
+        <header>
+          <div>
+            ${tpl.logoTag(settings, 'print-logo logo-inline')}
+            <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
+            <div style="font-size:13px;color:#475569;margin-top:6px">
+              ${esc(settings.company_address || '')}<br/>
+              ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
+              ${tpl.taxIdLine(settings)}
+            </div>
+          </div>
+          <div class="meta">
+            <span class="badge">تحليل المبيعات</span><br/><br/>
+            وقت الإصدار: ${esc(data.generated_at)}<br/>
+            ${ctx.query.from ? `من: ${esc(ctx.query.from)}<br/>` : ''}
+            ${ctx.query.to ? `إلى: ${esc(ctx.query.to)}<br/>` : ''}
+            عدد الفواتير: ${data.totals.invoices}
+          </div>
+        </header>
+        <div class="cards">
+          <div class="box"><div class="lbl">صافي المبيعات</div><div class="val" style="color:#059669">${money(data.totals.revenue, cur)}</div></div>
+          <div class="box"><div class="lbl">عدد الفواتير</div><div class="val">${data.totals.invoices}</div></div>
+          <div class="box"><div class="lbl">متوسط الفاتورة</div><div class="val" style="color:#4338ca">${money(data.totals.avg_ticket, cur)}</div></div>
+          <div class="box"><div class="lbl">الربح الإجمالي</div><div class="val" style="color:#b45309">${money(data.totals.profit, cur)}</div></div>
+        </div>
+        <h2 style="font-size:16px;margin:22px 0 8px">الأصناف الأكثر مبيعاً</h2>
+        <table class="items">
+          <thead><tr><th>الصنف</th><th style="text-align:left">الكمية</th><th style="text-align:left">الفواتير</th><th style="text-align:left">المبيعات</th><th style="text-align:left">التكلفة</th><th style="text-align:left">الربح</th><th style="text-align:left">الهامش</th></tr></thead>
+          <tbody>${prodRows || '<tr><td colspan="7" style="text-align:center;padding:16px">لا توجد مبيعات</td></tr>'}</tbody>
+        </table>
+        <h2 style="font-size:16px;margin:22px 0 8px">المبيعات حسب العميل</h2>
+        <table class="items">
+          <thead><tr><th>العميل</th><th>الهاتف</th><th style="text-align:left">الفواتير</th><th style="text-align:left">الإجمالي</th><th style="text-align:left">المدفوع</th><th style="text-align:left">المتبقي</th></tr></thead>
+          <tbody>${custRows || '<tr><td colspan="6" style="text-align:center;padding:16px">لا يوجد عملاء</td></tr>'}</tbody>
+        </table>
+        <h2 style="font-size:16px;margin:22px 0 8px">المبيعات اليومية</h2>
+        <table class="items">
+          <thead><tr><th>اليوم</th><th style="text-align:left">الفواتير</th><th style="text-align:left">الإجمالي</th></tr></thead>
+          <tbody>${dayRows || '<tr><td colspan="3" style="text-align:center;padding:16px">لا توجد بيانات</td></tr>'}</tbody>
+        </table>
+        <footer>
+          <div>${esc(settings.receipt_footer || '')}${tpl.footerExtra(settings)}</div>
+          <div style="text-align:left">المحاسب: ....................</div>
+        </footer>`;
+      sendText(ctx.res, 200, htmlDoc('تحليل المبيعات', A4_CSS + tpl.extraCss(settings, true), body), 'text/html; charset=utf-8');
+    });
+
     router.get('/api/print/account/:id', (ctx) => {
       const account = db.get('SELECT * FROM accounts WHERE id = ?', [ctx.params.id]);
       if (!account) return sendText(ctx.res, 404, 'الحساب غير موجود', 'text/plain; charset=utf-8');

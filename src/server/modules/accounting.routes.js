@@ -106,10 +106,103 @@ function buildIncomeStatement(query = {}) {
   };
 }
 
+function buildSalesAnalysis(query = {}) {
+  const where = [];
+  const params = [];
+  if (query.from) { where.push('date(i.created_at) >= date(?)'); params.push(query.from); }
+  if (query.to) { where.push('date(i.created_at) <= date(?)'); params.push(query.to); }
+  const range = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const and = where.length ? `${range} AND` : 'WHERE';
+  const limit = Math.min(Number(query.limit) || 20, 200);
+
+  const products = db.all(
+    `SELECT ii.product_id, ii.name,
+            ROUND(SUM(CASE WHEN i.type = 'sale' THEN ii.qty ELSE -ii.qty END), 3) AS qty,
+            ROUND(SUM(CASE WHEN i.type = 'sale' THEN ii.total ELSE -ii.total END), 2) AS revenue,
+            ROUND(SUM(CASE WHEN i.type = 'sale' THEN ii.qty * ii.cost_price ELSE -ii.qty * ii.cost_price END), 2) AS cost,
+            COUNT(DISTINCT i.id) AS invoices
+     FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+     ${and} i.type IN ('sale','return_sale')
+     GROUP BY ii.product_id, ii.name
+     HAVING qty > 0
+     ORDER BY revenue DESC LIMIT ?`,
+    [...params, limit]
+  ).map((r) => ({
+    ...r,
+    qty: Number(r.qty) || 0,
+    revenue: Number(r.revenue) || 0,
+    cost: Number(r.cost) || 0,
+    profit: Math.round(((Number(r.revenue) || 0) - (Number(r.cost) || 0)) * 100) / 100,
+    margin: Number(r.revenue) ? Math.round((((Number(r.revenue) || 0) - (Number(r.cost) || 0)) / Number(r.revenue)) * 1000) / 10 : 0,
+  }));
+
+  const customers = db.all(
+    `SELECT i.customer_id, COALESCE(c.name, 'عميل نقدي') AS name, c.phone,
+            COUNT(*) AS invoices,
+            ROUND(SUM(i.total), 2) AS total,
+            ROUND(SUM(i.paid), 2) AS paid,
+            ROUND(SUM(i.due), 2) AS due
+     FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id
+     ${and} i.type = 'sale'
+     GROUP BY i.customer_id, c.name, c.phone
+     ORDER BY total DESC LIMIT ?`,
+    [...params, limit]
+  ).map((r) => ({
+    ...r,
+    invoices: Number(r.invoices) || 0,
+    total: Number(r.total) || 0,
+    paid: Number(r.paid) || 0,
+    due: Number(r.due) || 0,
+    avg: r.invoices ? Math.round((Number(r.total) / Number(r.invoices)) * 100) / 100 : 0,
+  }));
+
+  const daily = db.all(
+    `SELECT date(i.created_at) AS day, COUNT(*) AS invoices, ROUND(SUM(i.total), 2) AS total
+     FROM invoices i
+     ${and} i.type = 'sale'
+     GROUP BY day ORDER BY day DESC LIMIT 60`,
+    params
+  ).reverse().map((r) => ({
+    day: r.day,
+    invoices: Number(r.invoices) || 0,
+    total: Number(r.total) || 0,
+  }));
+
+  const sums = db.get(
+    `SELECT COUNT(CASE WHEN i.type = 'sale' THEN 1 END) AS invoices,
+            ROUND(COALESCE(SUM(CASE WHEN i.type = 'sale' THEN i.total ELSE -i.total END), 0), 2) AS revenue,
+            COUNT(DISTINCT CASE WHEN i.customer_id IS NOT NULL THEN i.customer_id END) AS customers
+     FROM invoices i ${range || 'WHERE 1=1'}`,
+    params
+  );
+  const revenue = Number(sums.revenue) || 0;
+  const invoices = Number(sums.invoices) || 0;
+  const cost = Math.round(products.reduce((s, p) => s + p.cost, 0) * 100) / 100;
+  const soldRevenue = Math.round(products.reduce((s, p) => s + p.revenue, 0) * 100) / 100;
+  return {
+    generated_at: new Date().toLocaleString('ar-IQ'),
+    products,
+    customers,
+    daily,
+    totals: {
+      revenue,
+      invoices,
+      customers: Number(sums.customers) || 0,
+      avg_ticket: invoices ? Math.round((revenue / invoices) * 100) / 100 : 0,
+      cost,
+      profit: Math.round((soldRevenue - cost) * 100) / 100,
+      margin: soldRevenue ? Math.round(((soldRevenue - cost) / soldRevenue) * 1000) / 10 : 0,
+      top_product: products.length ? products[0].name : '',
+      top_customer: customers.length ? customers[0].name : '',
+    },
+  };
+}
+
 module.exports = {
   buildIncomeStatement,
   buildInventoryReport,
   buildTaxReport,
+  buildSalesAnalysis,
   register(router) {
     router.get('/api/accounts', (ctx) => {
       const rows = db.all('SELECT * FROM accounts ORDER BY code');
@@ -390,6 +483,10 @@ module.exports = {
 
     router.get('/api/reports/tax', (ctx) => {
       sendJson(ctx.res, 200, buildTaxReport(ctx.query));
+    });
+
+    router.get('/api/reports/sales-analysis', (ctx) => {
+      sendJson(ctx.res, 200, buildSalesAnalysis(ctx.query));
     });
   },
 };
