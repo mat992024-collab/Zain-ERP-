@@ -744,6 +744,44 @@ async function main() {
   await sleep(400);
   await evalJs(`fetch('/api/products/${productId}/prices/USD',{method:'DELETE',headers:{'Authorization':'Bearer ${token}'}})`, true);
 
+  phase = 'repeat-invoice';
+  await evalJs(`location.hash = '#/sales'`);
+  await sleep(1500);
+  await waitFor(`!!document.querySelector('[data-rep]')`, 40);
+  const repBtns = await evalJs(`document.querySelectorAll('[data-rep]').length`);
+  check('sales rows offer repeat button', repBtns > 0, 'count=' + repBtns);
+  const salesBeforeRepeat = await evalJs(`fetch('/api/sales?page_size=500',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.total)`, true);
+  await evalJs(`document.querySelector('[data-rep]').click()`);
+  for (let i = 0; i < 2; i++) {
+    const hasConfirm = await waitFor(`(function(){const b=[...document.querySelectorAll('.modal-backdrop')].pop();return !!(b&&b.querySelector('[data-yes]'));})()`, 8);
+    if (!hasConfirm) break;
+    await evalJs(`(function(){const b=[...document.querySelectorAll('.modal-backdrop')].pop();const y=b.querySelector('[data-yes]');if(y)y.click();})()`);
+    await sleep(900);
+  }
+  await sleep(700);
+  const salesAfterRepeat = await evalJs(`fetch('/api/sales?page_size=500',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.total)`, true);
+  check('repeat invoice creates invoice', Number(salesAfterRepeat) === Number(salesBeforeRepeat) + 1, `${salesBeforeRepeat} -> ${salesAfterRepeat}`);
+  const repToast = await evalJs(`/تم إنشاء الفاتورة/.test((document.getElementById('toastRoot') || {}).innerText || '')`);
+  check('repeat invoice shows toast', repToast === true);
+  const repNotes = await evalJs(`fetch('/api/sales?page_size=5',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows[0].notes || '')`, true);
+  check('repeat invoice tagged in list', /تكرار/.test(repNotes), repNotes);
+
+  phase = 'repeat-voucher';
+  await evalJs(`location.hash = '#/accounting'`);
+  await sleep(1200);
+  await evalJs(`(function(){const b=[...document.querySelectorAll('[data-tab]')].find(x=>x.dataset.tab==='vouchers');if(b)b.click();})()`);
+  const vRepReady = await waitFor(`!!document.querySelector('[data-vrep]')`, 40);
+  check('vouchers list offers repeat button', vRepReady === true);
+  const vouchersBeforeRepeat = await evalJs(`fetch('/api/vouchers?page_size=500',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.total)`, true);
+  await evalJs(`document.querySelector('[data-vrep]').click()`);
+  await waitFor(`(function(){const b=[...document.querySelectorAll('.modal-backdrop')].pop();return !!(b&&b.querySelector('[data-yes]'));})()`, 20);
+  await evalJs(`(function(){const b=[...document.querySelectorAll('.modal-backdrop')].pop();const y=b.querySelector('[data-yes]');if(y)y.click();})()`);
+  await sleep(1600);
+  const vouchersAfterRepeat = await evalJs(`fetch('/api/vouchers?page_size=500',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.total)`, true);
+  check('repeat voucher creates voucher', Number(vouchersAfterRepeat) === Number(vouchersBeforeRepeat) + 1, `${vouchersBeforeRepeat} -> ${vouchersAfterRepeat}`);
+  const vRepToast = await evalJs(`/تم إنشاء السند/.test((document.getElementById('toastRoot') || {}).innerText || '')`);
+  check('repeat voucher shows toast', vRepToast === true);
+
   phase = 'overdue-installments';
   const lateCustomer = await evalJs(`fetch('/api/customers',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({name:'عميل متأخر UI'})}).then(r=>r.json()).then(d=>d.customer.id)`, true);
   const lateDate = new Date(Date.now() - 4 * 86400000).toISOString().slice(0, 10);

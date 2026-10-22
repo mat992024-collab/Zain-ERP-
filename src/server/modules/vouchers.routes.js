@@ -320,6 +320,42 @@ module.exports = {
       sendJson(ctx.res, 201, { voucher, type_label: TYPE_LABEL[type] });
     });
 
+    router.post('/api/vouchers/:id/repeat', (ctx) => {
+      if (!ctx.can('accounting.write')) throw new HttpError(403, 'لا تملك صلاحية الإضافة');
+      const src = db.get('SELECT * FROM vouchers WHERE id = ?', [ctx.params.id]);
+      if (!src) throw new HttpError(404, 'السند غير موجود');
+      const date = db.get("SELECT date('now','localtime') AS d").d;
+      const shift = db.get(`SELECT id FROM shifts WHERE status='open' AND user_id = ? ORDER BY id DESC LIMIT 1`, [ctx.user.id]);
+      const shiftId = shift ? shift.id : null;
+      const amount = Number(src.amount) || 0;
+      const rate = Number(src.exchange_rate) || 1;
+      const amountOriginal = src.amount_original === null || src.amount_original === undefined ? amount : Number(src.amount_original);
+      const partner = partnerRow(src.partner_type, src.partner_id);
+      const common = {
+        amount,
+        description: src.description,
+        userId: ctx.user.id,
+        shiftId,
+        date,
+        currencyCode: src.currency,
+        exchangeRate: rate,
+        amountOriginal,
+      };
+      let voucherId;
+      if (src.type === 'transfer') {
+        voucherId = postTransfer({ ...common, fromAccount: src.from_account, toAccount: src.to_account });
+      } else if (src.type === 'receipt') {
+        voucherId = postReceipt({ ...common, partner: partner ? { ...partner, type: src.partner_type } : null, method: src.method || 'cash' });
+      } else {
+        voucherId = postPayout({ ...common, partner: partner ? { ...partner, type: src.partner_type } : null, method: src.method || 'cash' });
+      }
+      db.logActivity(ctx.user.id, 'voucher_create', 'vouchers', voucherId, { type: src.type, amount, repeated_from: src.id });
+      sendJson(ctx.res, 201, {
+        voucher: db.get('SELECT * FROM vouchers WHERE id = ?', [voucherId]),
+        repeated_from: src.id,
+      });
+    });
+
     router.delete('/api/vouchers/:id', (ctx) => {
       if (!ctx.can('accounting.write')) throw new HttpError(403, 'لا تملك صلاحية الحذف');
       const voucher = db.get('SELECT * FROM vouchers WHERE id = ?', [ctx.params.id]);

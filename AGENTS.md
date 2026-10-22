@@ -11,9 +11,9 @@ npm run build:css      # إلزامي بعد أي تعديل على src/web/styl
 npm start              # تشغيل + فتح Edge/Chrome في وضع --app
 npm run serve          # الخادم فقط (المنفذ 4180 أو ZAIN_PORT)
 npm test               # 3 مجموعات: API + رسم شاشات + متصفح حقيقي
-npm run test:api       # tests/e2e.js            (301 فحصاً)
+npm run test:api       # tests/e2e.js            (321 فحصاً)
 npm run test:render    # tests/render.test.mjs   (14 فحصاً)
-npm run test:ui        # tests/browser.test.mjs  (132 فحصاً)
+npm run test:ui        # tests/browser.test.mjs  (139 فحصاً)
 npm run seed           # بيانات تجريبية
 npm run reset          # تصفير القاعدة
 ```
@@ -51,7 +51,7 @@ tests/                       e2e.js, render.test.mjs, browser.test.mjs
 
 ## قبل أي commit
 1. `npm run build:css` إذا لزم.
-2. `npm test` يجب أن يمرّ بالكامل (301 + 14 + 132) بدون console errors.
+2. `npm test` يجب أن يمرّ بالكامل (321 + 14 + 139) بدون console errors.
 3. لا تدفع `data/` أو `node_modules/` (مستثناة في `.gitignore`).
 4. صور الأصناف تُحفظ على القرص في `data/images/` وتُقدَّم من `/images/*`؛ لا تُخزَّن base64 في قاعدة البيانات.
 5. النسخ الاحتياطي = أرشيف zip (بلا ضغط) يضم `zain.db` و`images/*` عبر `src/server/core/zip.js`؛ لا تُضاف اعتماديات خارجية.

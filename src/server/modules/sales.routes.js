@@ -348,6 +348,55 @@ module.exports = {
       sendJson(ctx.res, 200, { invoice, items, payments });
     });
 
+    router.post('/api/sales/:id/repeat', (ctx) => {
+      const inv = db.get('SELECT * FROM invoices WHERE id = ?', [ctx.params.id]);
+      if (!inv) throw new HttpError(404, 'الفاتورة غير موجودة');
+      if (inv.type !== 'sale' && inv.type !== 'purchase') throw new HttpError(400, 'يمكن تكرار فواتير البيع والشراء فقط');
+      const isPurchase = inv.type === 'purchase';
+      if (isPurchase) {
+        if (!ctx.can('purchases.write') && !ctx.can('inventory.write')) throw new HttpError(403, 'لا تملك صلاحية الشراء');
+      } else if (!ctx.can('pos.sell') && !ctx.can('sales.write')) {
+        throw new HttpError(403, 'لا تملك صلاحية البيع');
+      }
+      const rows = db.all(
+        'SELECT product_id, name, qty, unit, unit_price, cost_price, discount FROM invoice_items WHERE invoice_id = ?',
+        [inv.id]
+      );
+      if (!rows.length) throw new HttpError(400, 'الفاتورة لا تحتوي على أصناف');
+      const items = normalizeItems(rows);
+      const itemsDiscount = round2(items.reduce((s, i) => s + i.discount, 0));
+      const invoiceDiscount = Math.max(round2(Number(inv.discount) - itemsDiscount), 0);
+      if (!isPurchase && inv.payment_method === 'credit') {
+        creditLimitCheck({
+          customerId: inv.customer_id,
+          due: Number(inv.total) || 0,
+          force: (ctx.body || {}).force_credit_limit === true,
+          canOverride: ctx.can('sales.write'),
+        });
+      }
+      const result = persistInvoice({
+        type: inv.type,
+        posMode: isPurchase ? 'purchase' : (inv.pos_mode || 'fast'),
+        customerId: inv.customer_id,
+        supplierId: inv.supplier_id,
+        userId: ctx.user.id,
+        items,
+        discount: invoiceDiscount,
+        tax: Number(inv.tax) || 0,
+        taxInclusive: !!inv.tax_inclusive,
+        paymentMethod: inv.payment_method,
+        notes: `تكرار ${inv.invoice_no}`,
+      });
+      db.logActivity(ctx.user.id, isPurchase ? 'purchase' : 'sale', 'invoices', result.id, {
+        total: Number(inv.total) || 0, repeated_from: inv.id, invoice_no: inv.invoice_no,
+      });
+      sendJson(ctx.res, 201, {
+        invoice: db.get('SELECT * FROM invoices WHERE id = ?', [result.id]),
+        id: result.id,
+        repeated_from: inv.id,
+      });
+    });
+
     router.post('/api/sales', (ctx) => {
       if (!ctx.can('pos.sell') && !ctx.can('sales.write')) throw new HttpError(403, 'لا تملك صلاحية البيع');
       const body = ctx.body || {};

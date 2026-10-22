@@ -757,6 +757,56 @@ const { readZip } = require('../src/server/core/zip');
   r = await call('POST', '/api/installments/mark-overdue', null, cashierToken);
   ok('mark-overdue denied without permission (403)', r.status === 403, String(r.status));
 
+  r = await call('GET', '/api/sales/1', null, token);
+  const srcSale = r.data.invoice;
+  const stockBeforeRepeat = Number((await call('GET', `/api/products/${pid}`, null, token)).data.product.quantity);
+  r = await call('POST', '/api/sales/1/repeat', null, token);
+  ok('repeat credit over limit blocked (409)', r.status === 409 && r.data.code === 'CREDIT_LIMIT', JSON.stringify({ status: r.status, code: r.data && r.data.code }));
+  r = await call('POST', '/api/sales/1/repeat', { force_credit_limit: true }, token);
+  ok('repeat sale invoice', r.status === 201 && Number(r.data.invoice.total) === Number(srcSale.total) && r.data.repeated_from === 1, JSON.stringify({ total: r.data.invoice && r.data.invoice.total, from: r.data.repeated_from }));
+  ok('repeat sale copies items and notes', String(r.data.invoice.notes || '').includes('تكرار') && String(r.data.invoice.notes).includes(srcSale.invoice_no) && r.data.invoice.id !== 1, String(r.data.invoice.notes));
+  ok('repeat sale gets new number', r.data.invoice.invoice_no !== srcSale.invoice_no, `${srcSale.invoice_no} -> ${r.data.invoice.invoice_no}`);
+  const repeatItems = (await call('GET', `/api/sales/${r.data.invoice.id}`, null, token)).data.items;
+  ok('repeat sale items match original', repeatItems.length === 1 && Number(repeatItems[0].unit_price) === 500000 && Number(repeatItems[0].qty) === 2, JSON.stringify(repeatItems.map((x) => ({ p: x.unit_price, q: x.qty }))));
+  const stockAfterRepeat = Number((await call('GET', `/api/products/${pid}`, null, token)).data.product.quantity);
+  ok('repeat sale moves stock', stockBeforeRepeat - stockAfterRepeat === 2, `${stockBeforeRepeat} -> ${stockAfterRepeat}`);
+  ok('repeat of credit sale is unpaid', Number(r.data.invoice.paid) === 0 && Number(r.data.invoice.due) === Number(r.data.invoice.total), JSON.stringify({ paid: r.data.invoice.paid, due: r.data.invoice.due }));
+
+  const cashRow = (await call('GET', '/api/sales?type=sale&page_size=500', null, token)).data.rows.find((x) => x.payment_method === 'cash');
+  r = await call('POST', `/api/sales/${cashRow.id}/repeat`, null, token);
+  ok('repeat cash sale fully paid', r.status === 201 && Number(r.data.invoice.paid) === Number(r.data.invoice.total) && Number(r.data.invoice.due) === 0, JSON.stringify({ paid: r.data.invoice && r.data.invoice.paid }));
+
+  const stockBeforePurchaseRepeat = Number((await call('GET', `/api/products/${spid}`, null, token)).data.product.quantity);
+  r = await call('POST', `/api/sales/${purchaseId}/repeat`, null, token);
+  ok('repeat purchase invoice', r.status === 201 && r.data.invoice.type === 'purchase', JSON.stringify(r.data.invoice && r.data.invoice.type));
+  const stockAfterPurchaseRepeat = Number((await call('GET', `/api/products/${spid}`, null, token)).data.product.quantity);
+  ok('repeat purchase adds stock', stockAfterPurchaseRepeat - stockBeforePurchaseRepeat === 10, `${stockBeforePurchaseRepeat} -> ${stockAfterPurchaseRepeat}`);
+
+  const returnRow = (await call('GET', '/api/sales?type=return_sale&page_size=5', null, token)).data.rows[0];
+  r = await call('POST', `/api/sales/${returnRow.id}/repeat`, null, token);
+  ok('repeat rejects return invoices (400)', r.status === 400, String(r.status));
+  r = await call('POST', `/api/sales/${purchaseId}/repeat`, null, cashierToken);
+  ok('repeat purchase requires permission (403)', r.status === 403, String(r.status));
+  r = await call('POST', '/api/sales/999999/repeat', null, token);
+  ok('repeat missing invoice (404)', r.status === 404, String(r.status));
+
+  r = await call('POST', '/api/vouchers', { type: 'receipt', amount: 12000, partner_type: 'customer', partner_id: cid, method: 'cash', description: 'سند تكرار' }, token);
+  const repVoucherId = r.data.voucher.id;
+  const balanceBeforeRepeat = Number((await call('GET', `/api/customers/${cid}`, null, token)).data.customer.balance);
+  r = await call('POST', `/api/vouchers/${repVoucherId}/repeat`, null, token);
+  ok('repeat voucher creates copy', r.status === 201 && r.data.voucher.id !== repVoucherId && Number(r.data.voucher.amount) === 12000, JSON.stringify(r.data.voucher && r.data.voucher.voucher_no));
+  ok('repeat voucher keeps type and description', r.data.voucher.type === 'receipt' && r.data.voucher.description === 'سند تكرار', JSON.stringify({ type: r.data.voucher.type, desc: r.data.voucher.description }));
+  ok('repeat voucher gets new number', r.data.voucher.voucher_no !== (await call('GET', `/api/vouchers/${repVoucherId}`, null, token)).data.voucher.voucher_no, r.data.voucher.voucher_no);
+  const balanceAfterRepeat = Number((await call('GET', `/api/customers/${cid}`, null, token)).data.customer.balance);
+  ok('repeat voucher updates customer balance', Math.abs((balanceBeforeRepeat - balanceAfterRepeat) - 12000) < 0.01, `${balanceBeforeRepeat} -> ${balanceAfterRepeat}`);
+  r = await call('POST', `/api/vouchers/${repVoucherId}/repeat`, null, cashierToken);
+  ok('repeat voucher requires permission (403)', r.status === 403, String(r.status));
+  r = await call('POST', '/api/vouchers/999999/repeat', null, token);
+  ok('repeat missing voucher (404)', r.status === 404, String(r.status));
+
+  r = await call('GET', '/api/reports/trial-balance', null, token);
+  ok('trial balance balanced after repeats', Math.abs(r.data.totals.debit - r.data.totals.credit) < 0.01, `${r.data.totals.debit} / ${r.data.totals.credit}`);
+
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

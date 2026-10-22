@@ -113,6 +113,7 @@ export async function renderAccounting(c) {
             <td class="td">
               <div class="flex items-center gap-2">
                 <button data-vprint="${r.id}" class="text-zain-600 hover:text-zain-800" title="طباعة"><i class="bi bi-printer"></i></button>
+                <button data-vrep="${r.id}" class="text-indigo-500 hover:text-indigo-700" title="تكرار السند"><i class="bi bi-arrow-repeat"></i></button>
                 <button data-vdel="${r.id}" class="text-rose-400 hover:text-rose-600" title="إلغاء السند"><i class="bi bi-trash3"></i></button>
               </div>
             </td></tr>`).join('') || '<tr><td colspan="7" class="td text-center text-slate-400 py-8">لا توجد سندات</td></tr>'}</tbody>
@@ -120,6 +121,14 @@ export async function renderAccounting(c) {
       </div>`;
     p.querySelector('#vcAdd').addEventListener('click', () => newVoucher(p));
     p.querySelectorAll('[data-vprint]').forEach((b) => b.addEventListener('click', () => openPrint(`/api/print/voucher/${b.dataset.vprint}`)));
+    p.querySelectorAll('[data-vrep]').forEach((b) => b.addEventListener('click', async () => {
+      if (!(await confirmBox('إنشاء سند جديد بنفس البيانات بتاريخ اليوم؟'))) return;
+      try {
+        const res = await api('POST', `/api/vouchers/${b.dataset.vrep}/repeat`);
+        toast(`تم إنشاء السند ${res.voucher ? res.voucher.voucher_no : ''}`, 'success');
+        vouchers(p);
+      } catch (e) { toast(e.message, 'error'); }
+    }));
     p.querySelectorAll('[data-vdel]').forEach((b) => b.addEventListener('click', async () => {
       if (!(await confirmBox('إلغاء السند وعكس أثره على الخزنة والحسابات؟'))) return;
       try { await api('DELETE', `/api/vouchers/${b.dataset.vdel}`); toast('تم إلغاء السند', 'success'); vouchers(p); } catch (e) { toast(e.message, 'error'); }

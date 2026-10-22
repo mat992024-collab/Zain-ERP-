@@ -57,6 +57,7 @@ export async function renderSales(c) {
         <td class="td"><div class="flex gap-1">
           <button data-view="${r.id}" class="btn btn-ghost btn-sm"><i class="bi bi-eye"></i></button>
           <button data-print="${r.id}" class="btn btn-ghost btn-sm"><i class="bi bi-printer"></i></button>
+          ${r.type === 'sale' || r.type === 'purchase' ? `<button data-rep="${r.id}" class="btn btn-ghost btn-sm text-zain-600" title="تكرار الفاتورة"><i class="bi bi-arrow-repeat"></i></button>` : ''}
           ${r.type === 'sale' ? `<button data-ret="${r.id}" class="btn btn-ghost btn-sm text-amber-600" title="مرتجع بيع"><i class="bi bi-arrow-return-right"></i></button>` : ''}
           ${r.type === 'purchase' ? `<button data-puret="${r.id}" class="btn btn-ghost btn-sm text-amber-600" title="مرتجع شراء"><i class="bi bi-arrow-return-left"></i></button>` : ''}
         </div></td>
@@ -65,6 +66,7 @@ export async function renderSales(c) {
     c.querySelectorAll('[data-print]').forEach((b) => b.addEventListener('click', () => printMenu(+b.dataset.print)));
     c.querySelectorAll('[data-ret]').forEach((b) => b.addEventListener('click', () => salesReturn(+b.dataset.ret, load)));
     c.querySelectorAll('[data-puret]').forEach((b) => b.addEventListener('click', () => purchaseReturn(+b.dataset.puret, load)));
+    c.querySelectorAll('[data-rep]').forEach((b) => b.addEventListener('click', () => repeatInvoice(+b.dataset.rep, load)));
   };
 
   c.querySelector('#sApply').addEventListener('click', () => {
@@ -118,6 +120,7 @@ export async function renderSales(c) {
           </div>
         </div>`,
       footer: `<button data-close class="btn btn-ghost">إغلاق</button>
+        ${inv.type === 'sale' || inv.type === 'purchase' ? `<button id="vRepeat" class="btn btn-ghost"><i class="bi bi-arrow-repeat"></i> تكرار</button>` : ''}
         ${inv.customer_id ? `<button id="vStmt" class="btn btn-ghost"><i class="bi bi-file-text"></i> كشف الحساب</button>` : ''}
         <button id="vThermal" class="btn btn-primary"><i class="bi bi-receipt"></i> حراري</button>
         <button id="vA4" class="btn btn-ghost"><i class="bi bi-file-earmark-text"></i> A4</button>`,
@@ -126,6 +129,8 @@ export async function renderSales(c) {
         wrap.querySelector('#vA4').addEventListener('click', () => openPrint(`/api/print/a4/${id}`));
         const stmtBtn = wrap.querySelector('#vStmt');
         if (stmtBtn) stmtBtn.addEventListener('click', () => openPrint(`/api/print/statement/customer/${inv.customer_id}`));
+        const repeatBtn = wrap.querySelector('#vRepeat');
+        if (repeatBtn) repeatBtn.addEventListener('click', () => { close(); repeatInvoice(id, load); });
       },
     });
   }
@@ -145,6 +150,24 @@ export async function renderSales(c) {
         wrap.querySelector('#pA4').addEventListener('click', () => { openPrint(`/api/print/a4/${id}`); close(); });
       },
     });
+  }
+
+  async function repeatInvoice(id, reload) {
+    if (!(await confirmBox('إنشاء فاتورة جديدة بنفس الأصناف والأسعار؟'))) return;
+    const create = async (force) => {
+      try {
+        const res = await api('POST', `/api/sales/${id}/repeat`, force ? { force_credit_limit: true } : undefined);
+        toast(`تم إنشاء الفاتورة ${res.invoice ? res.invoice.invoice_no : ''}`, 'success');
+        reload();
+      } catch (e) {
+        if (e.code === 'CREDIT_LIMIT' && e.status === 409 && !force) {
+          if (await confirmBox(`${e.message} — تجاوز الحد وإنشاء الفاتورة؟`)) return create(true);
+          return;
+        }
+        toast(e.message, 'error');
+      }
+    };
+    return create(false);
   }
 
   async function salesReturn(id, reload) {
