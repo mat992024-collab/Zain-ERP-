@@ -7,6 +7,7 @@ export async function renderAccounting(c) {
     { key: 'expenses', label: 'المصروفات', icon: 'bi-receipt-cutoff' },
     { key: 'accounts', label: 'شجرة الحسابات', icon: 'bi-diagram-3' },
     { key: 'installments', label: 'الأقساط', icon: 'bi-calendar-check' },
+    { key: 'scheduled', label: 'الجدولة', icon: 'bi-calendar2-week' },
     { key: 'partners', label: 'الشركاء', icon: 'bi-person-badge' },
     { key: 'income', label: 'قائمة الدخل', icon: 'bi-graph-up-arrow' },
     { key: 'zreport', label: 'تقرير Z', icon: 'bi-clipboard2-check' },
@@ -36,7 +37,7 @@ export async function renderAccounting(c) {
   });
 
   const pane = () => c.querySelector('#accPane');
-  const open = (key) => ({ treasury: treasury, vouchers: vouchers, expenses: expenses, accounts: accounts, installments: installments, partners: partners, income: income, zreport: zreport, trial: trial }[key](pane()));
+  const open = (key) => ({ treasury: treasury, vouchers: vouchers, expenses: expenses, accounts: accounts, installments: installments, scheduled: scheduled, partners: partners, income: income, zreport: zreport, trial: trial }[key](pane()));
   treasury(pane());
 
   async function treasury(p) {
@@ -376,7 +377,7 @@ export async function renderAccounting(c) {
     p.innerHTML = `
       <div class="kpi mb-4"><div class="kpi-icon bg-amber-100 text-amber-700"><i class="bi bi-calendar-check"></i></div><div><div class="kpi-value">${money(data.remaining_total)}</div><div class="kpi-label">إجمالي المتبقي (${data.total} قسط)</div></div></div>
       <div class="card"><div class="overflow-auto max-h-[58vh]"><table class="w-full"><thead><tr><th class="th">العميل</th><th class="th">الإجمالي</th><th class="th">مدفوع</th><th class="th">متبقي</th><th class="th">الحالة</th><th class="th"></th></tr></thead>
-      <tbody>${data.rows.map((r) => `<tr class="tr"><td class="td font-bold">${esc(r.customer_name || '-')}</td><td class="td">${money(r.total)}</td><td class="td text-emerald-600">${money(r.paid_amount)}</td><td class="td text-rose-600 font-bold">${money(r.remaining)}</td><td class="td"><span class="badge ${r.status === 'completed' ? 'badge-ok' : 'badge-warn'}">${r.status === 'completed' ? 'مكتمل' : 'نشط'}</span></td>
+      <tbody>${data.rows.map((r) => `<tr class="tr"><td class="td font-bold">${esc(r.customer_name || '-')}</td><td class="td">${money(r.total)}</td><td class="td text-emerald-600">${money(r.paid_amount)}</td><td class="td text-rose-600 font-bold">${money(r.remaining)}</td><td class="td"><span class="badge ${r.status === 'completed' ? 'badge-ok' : r.status === 'overdue' ? 'badge-danger' : 'badge-warn'}">${r.status === 'completed' ? 'مكتمل' : r.status === 'overdue' ? 'متأخر' : 'نشط'}</span></td>
       <td class="td">${r.status !== 'completed' ? `<button data-pay="${r.id}" class="btn btn-success btn-sm"><i class="bi bi-cash"></i> تحصيل</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="td text-center text-slate-400 py-8">لا توجد أقساط</td></tr>'}</tbody></table></div></div>`;
     p.querySelectorAll('[data-pay]').forEach((b) => b.addEventListener('click', () => {
       const inst = data.rows.find((x) => x.id === +b.dataset.pay);
@@ -393,6 +394,191 @@ export async function renderAccounting(c) {
         },
       });
     }));
+  }
+
+  const FREQ = { daily: 'يومي', weekly: 'أسبوعي', monthly: 'شهري', yearly: 'سنوي' };
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const dateInput = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const fromDb = (s) => String(s || '').replace(' ', 'T').slice(0, 16);
+
+  async function scheduled(p) {
+    const data = await api('GET', '/api/scheduled');
+    const rows = data.rows || [];
+    const activeRows = rows.filter((r) => r.active);
+    const now = new Date();
+    const dueCount = activeRows.filter((r) => new Date(String(r.next_run).replace(' ', 'T')) <= now).length;
+    const runsTotal = rows.reduce((s, r) => s + (Number(r.runs_count) || 0), 0);
+    p.innerHTML = `
+      <div class="grid grid-cols-3 gap-4 mb-4">
+        <div class="kpi"><div class="kpi-icon bg-indigo-100 text-indigo-700"><i class="bi bi-calendar2-week"></i></div><div><div class="kpi-value">${num(activeRows.length)}</div><div class="kpi-label">جدولات نشطة</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-amber-100 text-amber-700"><i class="bi bi-alarm"></i></div><div><div class="kpi-value">${num(dueCount)}</div><div class="kpi-label">مستحقة الآن</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-arrow-repeat"></i></div><div><div class="kpi-value">${num(runsTotal)}</div><div class="kpi-label">فواتير منشأة</div></div></div>
+      </div>
+      <div class="card p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-black">الفواتير المجدولة</div>
+          <button id="schAdd" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i> جدولة جديدة</button>
+        </div>
+        <div class="overflow-auto max-h-[56vh]"><table class="w-full">
+          <thead><tr><th class="th">العنوان</th><th class="th">النوع</th><th class="th">الجهة</th><th class="th">التكرار</th><th class="th">التشغيل القادم</th><th class="th">آخر تشغيل</th><th class="th">مرات</th><th class="th">الحالة</th><th class="th"></th></tr></thead>
+          <tbody>${rows.map((r) => `<tr class="tr">
+            <td class="td font-bold">${esc(r.title)}</td>
+            <td class="td"><span class="badge ${r.type === 'purchase' ? 'badge-warn' : 'badge-info'}">${r.type === 'purchase' ? 'شراء' : 'بيع'}</span></td>
+            <td class="td">${esc(r.type === 'purchase' ? (r.supplier_name || '-') : (r.customer_name || '-'))}</td>
+            <td class="td">${FREQ[r.frequency] || esc(r.frequency)}</td>
+            <td class="td" dir="ltr">${esc(r.next_run || '-')}</td>
+            <td class="td text-slate-500" dir="ltr">${esc(r.last_run || '-')}</td>
+            <td class="td">${num(r.runs_count)}</td>
+            <td class="td"><span class="badge ${r.active ? 'badge-ok' : 'badge-mute'}">${r.active ? 'نشطة' : 'متوقفة'}</span></td>
+            <td class="td whitespace-nowrap">
+              <button data-sch-run="${r.id}" class="btn btn-success btn-sm" title="إنشاء الفاتورة الآن"><i class="bi bi-play-fill"></i></button>
+              <button data-sch-edit="${r.id}" class="btn btn-ghost btn-sm" title="تعديل"><i class="bi bi-pencil"></i></button>
+              <button data-sch-toggle="${r.id}" class="btn btn-ghost btn-sm" title="${r.active ? 'إيقاف' : 'تنشيط'}"><i class="bi ${r.active ? 'bi-pause-fill' : 'bi-play-circle'}"></i></button>
+              <button data-sch-del="${r.id}" class="btn btn-ghost btn-sm text-rose-600" title="حذف"><i class="bi bi-trash"></i></button>
+            </td></tr>`).join('') || '<tr><td colspan="9" class="td text-center text-slate-400 py-8">لا توجد فواتير مجدولة</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+    p.querySelector('#schAdd').addEventListener('click', () => scheduledForm(p, null));
+    p.querySelectorAll('[data-sch-edit]').forEach((b) => b.addEventListener('click', () => {
+      scheduledForm(p, rows.find((x) => x.id === +b.dataset.schEdit));
+    }));
+    p.querySelectorAll('[data-sch-run]').forEach((b) => b.addEventListener('click', async () => {
+      try {
+        const res = await api('POST', `/api/scheduled/${b.dataset.schRun}/run`);
+        toast(`تم إنشاء الفاتورة ${res.invoice ? res.invoice.invoice_no : ''}`, 'success');
+        scheduled(p);
+      } catch (e) { toast(e.message, 'error'); }
+    }));
+    p.querySelectorAll('[data-sch-toggle]').forEach((b) => b.addEventListener('click', async () => {
+      const row = rows.find((x) => x.id === +b.dataset.schToggle);
+      try {
+        await api('PUT', `/api/scheduled/${row.id}`, { active: row.active ? 0 : 1 });
+        toast(row.active ? 'تم إيقاف الجدولة' : 'تم تنشيط الجدولة', 'success');
+        scheduled(p);
+      } catch (e) { toast(e.message, 'error'); }
+    }));
+    p.querySelectorAll('[data-sch-del]').forEach((b) => b.addEventListener('click', async () => {
+      const row = rows.find((x) => x.id === +b.dataset.schDel);
+      if (!(await confirmBox(`حذف جدولة «${row.title}»؟`))) return;
+      try {
+        await api('DELETE', `/api/scheduled/${row.id}`);
+        toast('تم الحذف', 'success');
+        scheduled(p);
+      } catch (e) { toast(e.message, 'error'); }
+    }));
+  }
+
+  async function scheduledForm(p, existing) {
+    const [customers, suppliers, products] = await Promise.all([
+      api('GET', '/api/customers?page_size=300').then((r) => r.rows).catch(() => []),
+      api('GET', '/api/suppliers?page_size=300').then((r) => r.rows).catch(() => []),
+      api('GET', '/api/products?page_size=500').then((r) => r.rows).catch(() => []),
+    ]);
+    let items = [];
+    try { items = existing ? JSON.parse(existing.items || '[]') : []; } catch { items = []; }
+    if (!items.length) items = [{ qty: 1, unit_price: 0 }];
+    const defaultNext = existing ? fromDb(existing.next_run) : dateInput(new Date(Date.now() + 24 * 3600 * 1000));
+    const type = existing ? existing.type : 'sale';
+    const partyOptions = (list, selected) => list.map((x) => `<option value="${x.id}" ${String(x.id) === String(selected) ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+    const productOptions = (selected) => `<option value="">— بند حر —</option>` + products.map((x) => `<option value="${x.id}" ${String(x.id) === String(selected) ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+    const itemRow = (it = {}) => `
+      <div class="grid grid-cols-12 gap-2 items-center" data-sch-row>
+        <select data-si-product class="field col-span-4">${productOptions(it.product_id)}</select>
+        <input data-si-name class="field col-span-4" value="${esc(it.name || '')}" placeholder="الوصف" />
+        <input data-si-qty type="number" min="0.01" step="any" class="field col-span-1 text-center" value="${it.qty || 1}" title="الكمية" />
+        <input data-si-price type="number" min="0" step="any" class="field col-span-2 text-left" value="${it.unit_price || 0}" title="السعر" />
+        <button data-si-del class="btn btn-ghost btn-sm col-span-1"><i class="bi bi-x-lg"></i></button>
+      </div>`;
+    modal({
+      title: existing ? 'تعديل جدولة' : 'جدولة فاتورة',
+      size: 'max-w-2xl',
+      body: `
+        <div class="grid grid-cols-2 gap-2">
+          ${field('العنوان', `<input id="schTitle" class="field" value="${esc(existing ? existing.title : '')}" placeholder="إيجار شهري" />`)}
+          ${field('نوع الفاتورة', `<select id="schType" class="field"><option value="sale" ${type === 'sale' ? 'selected' : ''}>بيع</option><option value="purchase" ${type === 'purchase' ? 'selected' : ''}>شراء</option></select>`)}
+        </div>
+        <div class="mt-2">${field('الجهة', `<select id="schParty" class="field"></select>`)}</div>
+        <div class="grid grid-cols-2 gap-2 mt-2">
+          ${field('التكرار', `<select id="schFreq" class="field">${Object.entries(FREQ).map(([k, v]) => `<option value="${k}" ${existing && existing.frequency === k ? 'selected' : ''}>${v}</option>`).join('')}</select>`)}
+          ${field('التشغيل القادم', `<input id="schNext" type="datetime-local" class="field" value="${defaultNext}" />`)}
+        </div>
+        <div class="grid grid-cols-2 gap-2 mt-2">
+          ${field('طريقة الدفع', `<select id="schMethod" class="field"><option value="credit" ${existing && existing.payment_method === 'credit' ? 'selected' : ''}>آجل</option><option value="cash" ${existing && existing.payment_method === 'cash' ? 'selected' : ''}>نقدي</option></select>`)}
+          ${field('الخصم', `<input id="schDiscount" type="number" min="0" step="any" class="field" value="${Number(existing ? existing.discount : 0) || 0}" />`)}
+        </div>
+        <div class="mt-2">${field('ملاحظات', `<input id="schNotes" class="field" value="${esc(existing && existing.notes ? existing.notes : '')}" />`)}</div>
+        <div class="flex items-center justify-between mt-3 mb-1">
+          <div class="text-xs font-bold text-slate-500">الأصناف</div>
+          <button id="schAddItem" class="btn btn-ghost btn-sm"><i class="bi bi-plus-lg"></i> إضافة صنف</button>
+        </div>
+        <div id="schItems" class="flex flex-col gap-2">${items.map((it) => itemRow(it)).join('')}</div>`,
+      footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="schSave" class="btn btn-primary">حفظ الجدولة</button>`,
+      onMount(wrap, close) {
+        const party = wrap.querySelector('#schParty');
+        const fillParty = () => {
+          const t = wrap.querySelector('#schType').value;
+          const list = t === 'purchase' ? suppliers : customers;
+          const selected = existing ? (t === 'purchase' ? existing.supplier_id : existing.customer_id) : null;
+          party.innerHTML = `<option value="">— بدون —</option>` + partyOptions(list, selected);
+        };
+        fillParty();
+        wrap.querySelector('#schType').addEventListener('change', fillParty);
+        const itemsBox = wrap.querySelector('#schItems');
+        const sync = (row) => {
+          const pId = row.querySelector('[data-si-product]').value;
+          const prod = products.find((x) => String(x.id) === String(pId));
+          if (prod) {
+            row.querySelector('[data-si-name]').value = prod.name;
+            row.querySelector('[data-si-price]').value = Number(prod.sale_price) || 0;
+          }
+        };
+        itemsBox.querySelectorAll('[data-sch-row]').forEach((row) => {
+          row.querySelector('[data-si-product]').addEventListener('change', () => sync(row));
+          row.querySelector('[data-si-del]').addEventListener('click', () => {
+            if (itemsBox.querySelectorAll('[data-sch-row]').length <= 1) return;
+            row.remove();
+          });
+        });
+        wrap.querySelector('#schAddItem').addEventListener('click', () => {
+          itemsBox.insertAdjacentHTML('beforeend', itemRow({ qty: 1, unit_price: 0 }));
+          const row = itemsBox.lastElementChild;
+          row.querySelector('[data-si-product]').addEventListener('change', () => sync(row));
+          row.querySelector('[data-si-del]').addEventListener('click', () => {
+            if (itemsBox.querySelectorAll('[data-sch-row]').length <= 1) return;
+            row.remove();
+          });
+        });
+        wrap.querySelector('[data-cancel]').addEventListener('click', close);
+        wrap.querySelector('#schSave').addEventListener('click', async () => {
+          const type = wrap.querySelector('#schType').value;
+          const rows = [...itemsBox.querySelectorAll('[data-sch-row]')].map((row) => ({
+            product_id: row.querySelector('[data-si-product]').value || null,
+            name: row.querySelector('[data-si-name]').value.trim(),
+            qty: Number(row.querySelector('[data-si-qty]').value) || 1,
+            unit_price: Number(row.querySelector('[data-si-price]').value) || 0,
+          })).filter((it) => it.product_id || it.name);
+          const body = {
+            title: wrap.querySelector('#schTitle').value.trim(),
+            type,
+            frequency: wrap.querySelector('#schFreq').value,
+            next_run: String(wrap.querySelector('#schNext').value || '').replace('T', ' '),
+            payment_method: wrap.querySelector('#schMethod').value,
+            discount: Number(wrap.querySelector('#schDiscount').value) || 0,
+            notes: wrap.querySelector('#schNotes').value,
+            customer_id: type === 'sale' ? (party.value || null) : null,
+            supplier_id: type === 'purchase' ? (party.value || null) : null,
+            items,
+          };
+          try {
+            if (existing) await api('PUT', `/api/scheduled/${existing.id}`, body);
+            else await api('POST', '/api/scheduled', body);
+            toast('تم حفظ الجدولة', 'success');
+            close();
+            scheduled(p);
+          } catch (e) { toast(e.message, 'error'); }
+        });
+      },
+    });
   }
 
   async function partners(p) {

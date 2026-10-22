@@ -19,6 +19,8 @@ const ACTION_LABELS = {
   reminder_create: 'إنشاء تذكير',
   reminder_update: 'تعديل تذكير',
   reminder_delete: 'حذف تذكير',
+  scheduled_invoice: 'فاتورة مجدولة',
+  installments_overdue: 'أقساط متأخرة',
   login: 'دخول',
   logout: 'خروج',
 };
@@ -33,6 +35,8 @@ const ACTION_STYLES = {
   purchase_return: 'badge-warn',
   credit_limit_override: 'badge-danger',
   backup_restore: 'badge-warn',
+  installments_overdue: 'badge-danger',
+  scheduled_invoice: 'badge-info',
 };
 
 const ENTITY_LABELS = {
@@ -47,6 +51,7 @@ const ENTITY_LABELS = {
   reminders: 'تذكيرات',
   expenses: 'مصروفات',
   installments: 'أقساط',
+  scheduled_invoices: 'جدولة',
   shifts: 'ورديات',
   currencies: 'عملات',
 };

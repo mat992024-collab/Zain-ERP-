@@ -744,6 +744,51 @@ async function main() {
   await sleep(400);
   await evalJs(`fetch('/api/products/${productId}/prices/USD',{method:'DELETE',headers:{'Authorization':'Bearer ${token}'}})`, true);
 
+  phase = 'overdue-installments';
+  const lateCustomer = await evalJs(`fetch('/api/customers',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({name:'عميل متأخر UI'})}).then(r=>r.json()).then(d=>d.customer.id)`, true);
+  const lateDate = new Date(Date.now() - 4 * 86400000).toISOString().slice(0, 10);
+  const lateSale = await evalJs(`fetch('/api/sales',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({items:[{name:'خدمة صيانة',qty:1,unit_price:200000}],customer_id:${lateCustomer},payment_method:'credit',paid:0,installment_plan:{count:2,due_date:'${lateDate}'}})}).then(r=>r.json()).then(d=>d.invoice?d.invoice.id:0)`, true);
+  check('overdue fixture sale created', Number(lateSale) > 0, String(lateSale));
+  const lateMarked = await evalJs(`fetch('/api/installments/mark-overdue',{method:'POST',headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.marked)`, true);
+  check('overdue scan marks installment', Number(lateMarked) === 1, String(lateMarked));
+  await evalJs(`location.hash = '#/accounting'`);
+  await sleep(1200);
+  await evalJs(`(function(){const b=[...document.querySelectorAll('[data-tab]')].find(x=>x.dataset.tab==='installments');if(b)b.click();})()`);
+  const lateBadge = await waitFor(`document.getElementById('accPane') && /متأخر/.test(document.getElementById('accPane').innerText)`, 40);
+  check('installments tab shows overdue badge', lateBadge === true);
+
+  phase = 'scheduled-invoices';
+  await evalJs(`(function(){const b=[...document.querySelectorAll('[data-tab]')].find(x=>x.dataset.tab==='scheduled');if(b)b.click();})()`);
+  const schReady = await waitFor(`!!document.getElementById('schAdd')`, 40);
+  const schText = await evalJs(`document.getElementById('accPane').innerText`);
+  check('scheduled tab renders', schReady === true && /الفواتير المجدولة/.test(schText), schText.slice(0, 60).replace(/\n/g, ' '));
+  await evalJs(`document.getElementById('schAdd').click()`);
+  const schModal = await waitFor(`!!document.getElementById('schSave')`, 40);
+  const schOptions = await evalJs(`document.querySelectorAll('#schItems [data-si-product] option').length`);
+  check('scheduled form opens with products', schModal === true && schOptions > 1, 'options=' + schOptions);
+  await evalJs(`(function(){
+    document.getElementById('schTitle').value = 'إيجار اختبار المتصفح';
+    const n = document.getElementById('schNext'); n.value = '2020-01-05T09:00';
+    document.querySelector('#schItems [data-si-name]').value = 'إيجار مكتب';
+    document.querySelector('#schItems [data-si-price]').value = '150000';
+    document.getElementById('schMethod').value = 'cash';
+  })()`);
+  await evalJs(`document.getElementById('schSave').click()`);
+  const schSaved = await waitFor(`/إيجار اختبار المتصفح/.test(document.getElementById('accPane').innerText)`, 40);
+  check('scheduled invoice saved from UI', schSaved === true);
+  await evalJs(`document.querySelector('[data-sch-run]').click()`);
+  const schToast = await waitFor(`/تم إنشاء الفاتورة/.test((document.getElementById('toastRoot') || {}).innerText || '')`, 40);
+  check('scheduled run shows invoice toast', schToast === true);
+  await sleep(800);
+  const schRuns = await evalJs(`fetch('/api/scheduled',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows[0].runs_count)`, true);
+  check('scheduled run increments counter', Number(schRuns) === 1, String(schRuns));
+  await evalJs(`document.querySelector('[data-sch-toggle]').click()`);
+  await sleep(1200);
+  const schActive = await evalJs(`fetch('/api/scheduled',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows[0].active)`, true);
+  check('scheduled paused from UI', Number(schActive) === 0, String(schActive));
+  const schToggleText = await evalJs(`document.getElementById('accPane').innerText`);
+  check('scheduled row shows paused state', /متوقفة/.test(schToggleText), schToggleText.slice(0, 60).replace(/\n/g, ' '));
+
   phase = 'offline';
   const external = [...new Set(requests)].filter((u) => !u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:') && !u.startsWith('about:'));
   check('no external network requests (works offline)', external.length === 0, external.join(' , '));

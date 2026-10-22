@@ -20,6 +20,8 @@ const ACTION_LABELS = {
   reminder_create: 'إنشاء تذكير',
   reminder_update: 'تعديل تذكير',
   reminder_delete: 'حذف تذكير',
+  scheduled_invoice: 'فاتورة مجدولة',
+  installments_overdue: 'أقساط متأخرة',
   login: 'دخول',
   logout: 'خروج',
 };

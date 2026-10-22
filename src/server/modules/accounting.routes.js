@@ -4,6 +4,10 @@ const ledger = require('../core/ledger');
 const currency = require('./currency.routes');
 const { pick, buildInsert, buildUpdate, list } = require('../core/crud');
 
+function jobsRef() {
+  return require('../core/jobs');
+}
+
 const EXPENSE_FIELDS = ['category', 'description', 'amount', 'payment_method', 'date', 'currency', 'exchange_rate', 'amount_original'];
 const ACCOUNT_FIELDS = ['code', 'name', 'type', 'parent_id'];
 
@@ -383,7 +387,7 @@ module.exports = {
         [...params, limit, offset]
       );
       const totals = db.get(
-        `SELECT COUNT(*) AS c, COALESCE(SUM(remaining),0) AS remaining_total FROM installments ${whereSql}`, params
+        `SELECT COUNT(*) AS c, COALESCE(SUM(i.remaining),0) AS remaining_total FROM installments i ${whereSql}`, params
       );
       sendJson(ctx.res, 200, { rows, total: totals.c, remaining_total: totals.remaining_total });
     });
@@ -397,10 +401,11 @@ module.exports = {
       if (amount > inst.remaining + 0.001) throw new HttpError(400, 'المبلغ يتجاوز المتبقي');
       const newPaid = Number(inst.paid_amount) + amount;
       const newRemaining = Number(inst.total) - newPaid;
+      const stillOverdue = inst.due_date && db.get("SELECT date(?) < date('now','localtime') AS late", [inst.due_date]).late;
       db.tx(() => {
         db.run(
           `UPDATE installments SET paid_amount = ?, remaining = ?, status = ? WHERE id = ?`,
-          [newPaid, newRemaining, newRemaining <= 0.001 ? 'completed' : 'active', inst.id]
+          [newPaid, newRemaining, newRemaining <= 0.001 ? 'completed' : (stillOverdue ? 'overdue' : 'active'), inst.id]
         );
         db.run('INSERT INTO installment_payments (installment_id, amount, user_id, notes) VALUES (?, ?, ?, ?)',
           [inst.id, amount, ctx.user.id, (ctx.body || {}).notes || null]);
@@ -414,6 +419,12 @@ module.exports = {
       });
       db.logActivity(ctx.user.id, 'installment_pay', 'installments', inst.id, { amount });
       sendJson(ctx.res, 200, { installment: db.get('SELECT * FROM installments WHERE id = ?', [inst.id]) });
+    });
+
+    router.post('/api/installments/mark-overdue', (ctx) => {
+      if (!ctx.can('accounting.write')) throw new HttpError(403, 'لا تملك صلاحية');
+      const marked = jobsRef().markOverdueInstallments();
+      sendJson(ctx.res, 200, { marked });
     });
 
     router.get('/api/reports/summary', (ctx) => {

@@ -35,11 +35,11 @@ function lowStockItems() {
 function debts() {
   return db.all(
     `SELECT c.id, c.name, c.phone, c.balance,
-            (SELECT COALESCE(SUM(ip.remaining), 0) FROM installments ip WHERE ip.customer_id = c.id AND ip.status = 'active') AS installments
+            (SELECT COALESCE(SUM(ip.remaining), 0) FROM installments ip WHERE ip.customer_id = c.id AND ip.status IN ('active','overdue')) AS installments
      FROM customers c
      WHERE c.is_active = 1 AND (
         c.balance > 0
-        OR (SELECT COALESCE(SUM(ip.remaining), 0) FROM installments ip WHERE ip.customer_id = c.id AND ip.status = 'active') > 0
+        OR (SELECT COALESCE(SUM(ip.remaining), 0) FROM installments ip WHERE ip.customer_id = c.id AND ip.status IN ('active','overdue')) > 0
      )
      ORDER BY c.balance DESC, installments DESC LIMIT 60`
   );

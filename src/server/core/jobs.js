@@ -1,5 +1,6 @@
 const backup = require('../modules/backup.routes');
 const reminders = require('../modules/reminders.routes');
+const scheduled = require('../modules/scheduled.routes');
 const db = require('../db');
 
 function autoBackupDue(state, now = new Date()) {
@@ -57,10 +58,45 @@ function markDueRemindersRun() {
 
 let timer = null;
 
+function markOverdueInstallments() {
+  try {
+    const due = db.all(
+      `SELECT id FROM installments WHERE status = 'active' AND remaining > 0.001
+       AND due_date IS NOT NULL AND date(due_date) < date('now','localtime')`
+    );
+    if (!due.length) return 0;
+    db.run(
+      `UPDATE installments SET status = 'overdue' WHERE status = 'active' AND remaining > 0.001
+       AND due_date IS NOT NULL AND date(due_date) < date('now','localtime')`
+    );
+    db.logActivity(null, 'installments_overdue', 'installments', null, { count: due.length });
+    return due.length;
+  } catch (err) {
+    console.error('[zain] overdue installments failed:', err.message);
+    return 0;
+  }
+}
+
+function runScheduledInvoices() {
+  try {
+    return scheduled.runDue(null);
+  } catch (err) {
+    console.error('[zain] scheduled invoices failed:', err.message);
+    return [];
+  }
+}
+
+function tick() {
+  runAutoBackup();
+  runDailyDigest();
+  runScheduledInvoices();
+  markOverdueInstallments();
+}
+
 function start() {
-  const kick = setTimeout(() => { runAutoBackup(); runDailyDigest(); }, 8000);
+  const kick = setTimeout(tick, 8000);
   kick.unref();
-  timer = setInterval(() => { runAutoBackup(); runDailyDigest(); }, 60 * 1000);
+  timer = setInterval(tick, 60 * 1000);
   timer.unref();
   return timer;
 }
@@ -72,4 +108,9 @@ function stop() {
   }
 }
 
-module.exports = { start, stop, runAutoBackup, autoBackupDue, runDailyDigest, digestDue };
+module.exports = {
+  start, stop, tick,
+  runAutoBackup, autoBackupDue,
+  runDailyDigest, digestDue,
+  runScheduledInvoices, markOverdueInstallments,
+};

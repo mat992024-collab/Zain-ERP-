@@ -30,6 +30,7 @@ const MODULES = [
   require('./modules/reminders.routes'),
   require('./modules/activity.routes'),
   require('./modules/search.routes'),
+  require('./modules/scheduled.routes'),
 ];
 
 function buildRouter() {

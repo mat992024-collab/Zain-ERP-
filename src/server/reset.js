@@ -10,6 +10,7 @@ db.conn().exec(`
   DELETE FROM treasury;
   DELETE FROM installments;
   DELETE FROM installment_payments;
+  DELETE FROM scheduled_invoices;
   DELETE FROM account_entries;
   DELETE FROM ai_predictions;
   DELETE FROM ai_insights;

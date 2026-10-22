@@ -345,6 +345,30 @@ CREATE TABLE IF NOT EXISTS reminders (
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS scheduled_invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'sale',
+  customer_id INTEGER,
+  supplier_id INTEGER,
+  items TEXT NOT NULL DEFAULT '[]',
+  discount REAL NOT NULL DEFAULT 0,
+  payment_method TEXT NOT NULL DEFAULT 'credit',
+  notes TEXT,
+  frequency TEXT NOT NULL DEFAULT 'monthly',
+  next_run TEXT NOT NULL,
+  last_run TEXT,
+  runs_count INTEGER NOT NULL DEFAULT 0,
+  last_invoice_id INTEGER,
+  user_id INTEGER,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+  FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at);

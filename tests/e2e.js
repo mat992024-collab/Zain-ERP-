@@ -675,6 +675,88 @@ const { readZip } = require('../src/server/core/zip');
   ok('deleted product removed from list', !r.data.rows.some((x) => x.id === tmpPid), 'found=' + r.data.rows.some((x) => x.id === tmpPid));
   ok('deleted product image file deleted', !fs.existsSync(path.join(path.dirname(process.env.ZAIN_DB), 'images', tmpImageFile)), tmpImageFile);
 
+  r = await call('GET', '/api/scheduled', null, token);
+  ok('scheduled list empty', r.status === 200 && r.data.rows.length === 0, String(r.data.rows.length));
+  r = await call('POST', '/api/scheduled', {}, token);
+  ok('scheduled requires title (400)', r.status === 400, String(r.status));
+  r = await call('POST', '/api/scheduled', { title: 'بلا أصناف' }, token);
+  ok('scheduled requires items (400)', r.status === 400, String(r.status));
+  r = await call('POST', '/api/scheduled', { title: 'آجل بلا عميل', items: [{ name: 'خدمة', unit_price: 1000 }] }, token);
+  ok('scheduled credit sale requires customer (400)', r.status === 400, String(r.status));
+  r = await call('POST', '/api/scheduled', { title: 'شراء بلا مورد', type: 'purchase', items: [{ name: 'بند', unit_price: 1000 }] }, token);
+  ok('scheduled purchase requires supplier (400)', r.status === 400, String(r.status));
+
+  r = await call('POST', '/api/scheduled', {
+    title: 'إيجار شهري', type: 'sale', payment_method: 'cash', frequency: 'monthly',
+    next_run: '2020-01-01 09:00', items: [{ name: 'إيجار المكتب', qty: 1, unit_price: 250000 }],
+  }, token);
+  const scheduleId = r.data.schedule && r.data.schedule.id;
+  ok('create scheduled invoice', r.status === 201 && !!scheduleId, JSON.stringify(r.data.schedule));
+
+  r = await call('POST', '/api/scheduled/run-due', null, token);
+  ok('run-due creates invoice', r.status === 200 && r.data.created.length === 1, JSON.stringify(r.data.created));
+  r = await call('GET', '/api/scheduled', null, token);
+  const schRow = r.data.rows.find((x) => x.id === scheduleId);
+  ok('scheduled counters updated', schRow.runs_count === 1 && !!schRow.last_run && !!schRow.last_invoice_id, JSON.stringify(schRow));
+  ok('scheduled next run advanced', new Date(String(schRow.next_run).replace(' ', 'T')) > new Date(), String(schRow.next_run));
+  r = await call('GET', '/api/sales?type=sale&page_size=500', null, token);
+  const schInvoice = r.data.rows.find((x) => x.id === schRow.last_invoice_id);
+  ok('scheduled invoice created as cash sale', schInvoice && Number(schInvoice.total) === 250000 && Number(schInvoice.paid) === 250000 && schInvoice.payment_method === 'cash', JSON.stringify(schInvoice));
+  ok('scheduled invoice tagged with title', schInvoice && String(schInvoice.notes || '').includes('إيجار شهري'), schInvoice && schInvoice.notes);
+
+  r = await call('POST', '/api/scheduled/run-due', null, token);
+  ok('run-due skips future schedule', r.status === 200 && r.data.created.length === 0, JSON.stringify(r.data.created));
+
+  r = await call('PUT', `/api/scheduled/${scheduleId}`, { active: 0, next_run: '2020-01-02 09:00' }, token);
+  ok('pause scheduled invoice', r.status === 200 && r.data.rows.find((x) => x.id === scheduleId).active === 0, JSON.stringify(r.data.rows));
+  r = await call('POST', '/api/scheduled/run-due', null, token);
+  ok('run-due ignores paused schedule', r.status === 200 && r.data.created.length === 0, JSON.stringify(r.data.created));
+  r = await call('PUT', `/api/scheduled/${scheduleId}`, { active: 1 }, token);
+  ok('resume scheduled invoice', r.status === 200 && r.data.rows.find((x) => x.id === scheduleId).active === 1);
+  r = await call('POST', '/api/scheduled/run-due', null, token);
+  ok('run-due resumes creation', r.status === 200 && r.data.created.length === 1, JSON.stringify(r.data.created));
+
+  r = await call('POST', `/api/scheduled/${scheduleId}/run`, null, token);
+  ok('run scheduled invoice manually', r.status === 201 && !!r.data.invoice && Number(r.data.invoice.total) === 250000, JSON.stringify(r.data.invoice));
+  r = await call('GET', '/api/scheduled', null, token);
+  ok('manual run increments counter', r.data.rows.find((x) => x.id === scheduleId).runs_count === 3, JSON.stringify(r.data.rows));
+
+  r = await call('POST', '/api/scheduled', { title: 'بلا صلاحية', items: [{ name: 'x', unit_price: 1 }] }, cashierToken);
+  ok('scheduled denied without permission (403)', r.status === 403, String(r.status));
+  r = await call('POST', '/api/scheduled/run-due', null, cashierToken);
+  ok('scheduled run-due denied (403)', r.status === 403, String(r.status));
+
+  r = await call('DELETE', `/api/scheduled/${scheduleId}`, null, token);
+  ok('delete scheduled invoice', r.status === 200 && !r.data.rows.some((x) => x.id === scheduleId), String(r.data.rows.length));
+  r = await call('DELETE', `/api/scheduled/${scheduleId}`, null, token);
+  ok('deleting missing schedule (404)', r.status === 404, String(r.status));
+
+  r = await call('POST', '/api/customers', { name: 'عميل متأخر', phone: '0780' }, token);
+  const lateCustomer = r.data.customer.id;
+  const lateDate = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+  r = await call('POST', '/api/sales', {
+    items: [{ name: 'خدمة صيانة', qty: 1, unit_price: 400000 }], customer_id: lateCustomer,
+    payment_method: 'credit', paid: 0, installment_plan: { count: 2, due_date: lateDate },
+  }, token);
+  ok('overdue installment sale created', r.status === 201, String(r.status));
+  r = await call('GET', `/api/installments?status=overdue&customer_id=${lateCustomer}`, null, token);
+  ok('installment not overdue before scan', r.data.rows.length === 0, String(r.data.rows.length));
+  r = await call('POST', '/api/installments/mark-overdue', null, token);
+  ok('mark-overdue flags late installment', r.status === 200 && r.data.marked === 1, JSON.stringify(r.data));
+  r = await call('GET', `/api/installments?status=overdue&customer_id=${lateCustomer}`, null, token);
+  const lateInst = r.data.rows[0];
+  ok('overdue installment listed', r.data.rows.length === 1 && lateInst.status === 'overdue', JSON.stringify(lateInst && lateInst.status));
+  r = await call('POST', `/api/installments/${lateInst.id}/pay`, { amount: 150000 }, token);
+  ok('partial payment keeps overdue status', r.status === 200 && r.data.installment.status === 'overdue', r.data.installment && r.data.installment.status);
+  r = await call('POST', `/api/installments/${lateInst.id}/pay`, { amount: 250000 }, token);
+  ok('full payment completes overdue', r.status === 200 && r.data.installment.status === 'completed', r.data.installment && r.data.installment.status);
+  r = await call('POST', '/api/installments/mark-overdue', null, token);
+  ok('mark-overdue no-op when clean', r.data.marked === 0, JSON.stringify(r.data));
+  r = await call('GET', '/api/activity?action=installments_overdue', null, token);
+  ok('overdue scan logged in activity', r.data.rows.length === 1 && r.data.rows[0].action === 'installments_overdue', JSON.stringify(r.data.rows));
+  r = await call('POST', '/api/installments/mark-overdue', null, cashierToken);
+  ok('mark-overdue denied without permission (403)', r.status === 403, String(r.status));
+
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
