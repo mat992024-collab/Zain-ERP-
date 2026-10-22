@@ -13,6 +13,10 @@ async function contactsView(c, kind) {
     ? { balance: 'إجمالي الذمم', add: 'عميل جديد' }
     : { balance: 'إجمالي الالتزامات', add: 'مورد جديد' };
   let search = '';
+  if (state.pendingSearch && state.pendingSearch.view === kind) {
+    search = state.pendingSearch.q;
+    state.pendingSearch = null;
+  }
 
   const initial = await api('GET', `/api/${kind}?page_size=300`);
   c.innerHTML = `
@@ -71,6 +75,7 @@ async function contactsView(c, kind) {
     paint(d.rows);
   };
   paint(initial.rows);
+  if (search) { c.querySelector('#cSearch').value = search; reload(); }
 
   c.querySelector('#cSearch').addEventListener('input', (e) => {
     search = e.target.value;

@@ -6,6 +6,7 @@ export const state = {
   shift: null,
   cart: [],
   cartMeta: {},
+  pendingSearch: null,
 };
 
 export async function api(method, path, body) {

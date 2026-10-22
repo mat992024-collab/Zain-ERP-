@@ -5,6 +5,10 @@ const TYPE_LABELS = { sale: 'بيع', return_sale: 'مرتجع بيع', purchase
 export async function renderSales(c) {
   let page = 1;
   let filter = { type: '', from: '', to: '', search: '' };
+  if (state.pendingSearch && state.pendingSearch.view === 'sales') {
+    filter.search = state.pendingSearch.q;
+    state.pendingSearch = null;
+  }
   c.innerHTML = `
     <div class="card">
       <div class="p-4 flex flex-wrap items-center gap-3 border-b border-slate-100">
@@ -165,6 +169,7 @@ export async function renderSales(c) {
     } catch (e) { toast(e.message, 'error'); }
   }
 
+  if (filter.search) c.querySelector('#sSearch').value = filter.search;
   load();
 }
 

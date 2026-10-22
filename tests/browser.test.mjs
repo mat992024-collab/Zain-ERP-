@@ -495,7 +495,8 @@ async function main() {
   await sleep(400);
   await evalJs(`(function(){document.getElementById('rfTitle').value='صيانة أسبوعية';document.getElementById('rfBody').value='فحص الطابعة الحرارية';document.getElementById('rfTime').value='09:45';})()`);
   await evalJs(`document.getElementById('rfSave').click()`);
-  await sleep(1500);
+  await waitFor(`document.querySelectorAll('[data-rm-del]').length > 0`, 40);
+  await sleep(400);
   const rmRows = await evalJs(`document.querySelectorAll('[data-rm-del]').length`);
   check('custom reminder created from UI', rmRows === 1, 'rows=' + rmRows);
   const rmList = await evalJs(`fetch('/api/reminders',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows)`, true);
@@ -614,6 +615,34 @@ async function main() {
   check('sales analysis api returns ranking', anaApi && anaApi.r >= 0 && anaApi.p >= 0 && anaApi.c >= 0, JSON.stringify(anaApi));
   const anaPrintHtml = await evalJs(`fetch('/api/print/sales-analysis',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.text())`, true);
   check('sales analysis print contains header', anaPrintHtml.includes('تحليل المبيعات'), 'len=' + anaPrintHtml.length);
+
+  phase = 'quick-search';
+  await nav(BASE);
+  await waitFor(`document.querySelectorAll('#nav [data-nav]').length > 0`);
+  await sleep(900);
+  const searchBtn = await evalJs(`!!document.getElementById('searchBtn')`);
+  check('header search button present', searchBtn === true);
+  await evalJs(`document.getElementById('searchBtn').click()`);
+  await waitFor(`!!document.getElementById('gsInput')`);
+  await sleep(400);
+  check('quick search palette opens', (await evalJs(`!!document.getElementById('gsInput')`)) === true);
+  await evalJs(`(function(){const i=document.getElementById('gsInput');i.value='صنف اختبار المتصفح';i.dispatchEvent(new Event('input'));})()`);
+  await waitFor(`!!document.querySelector('#gsResults [data-go]')`, 40);
+  await sleep(500);
+  const gsText = await evalJs(`document.getElementById('gsResults').innerText`);
+  check('quick search returns product results', /صنف اختبار المتصفح/.test(gsText), gsText.slice(0, 60).replace(/\n/g, ' '));
+  await evalJs(`document.querySelector('#gsResults [data-go]').click()`);
+  await sleep(1500);
+  const gsRoute = await evalJs(`location.hash`);
+  check('quick search navigates to inventory', gsRoute === '#/inventory', gsRoute);
+  const gsSearch = await evalJs(`(document.getElementById('pSearch')||{}).value||''`);
+  check('quick search prefills view filter', /صنف اختبار/.test(gsSearch), gsSearch);
+  await evalJs(`document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}))`);
+  await sleep(600);
+  const gsReopen = await evalJs(`!!document.getElementById('gsInput')`);
+  check('ctrl+k reopens quick search', gsReopen === true);
+  await evalJs(`(function(){const b=document.querySelector('.modal-backdrop [data-close]');if(b)b.click();})()`);
+  await sleep(400);
 
   phase = 'offline';
   const external = [...new Set(requests)].filter((u) => !u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:') && !u.startsWith('about:'));

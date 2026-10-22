@@ -15,6 +15,10 @@ async function listView(c, { mode }) {
   let search = '';
   let category = '';
   let lowOnly = mode === 'inventory';
+  if (state.pendingSearch && state.pendingSearch.view === 'inventory') {
+    search = state.pendingSearch.q;
+    state.pendingSearch = null;
+  }
   const categories = await api('GET', '/api/products/categories').then((r) => r.categories).catch(() => []);
   const suppliers = await api('GET', '/api/suppliers?page_size=200').then((r) => r.rows).catch(() => []);
 
@@ -48,6 +52,8 @@ async function listView(c, { mode }) {
         <div class="flex gap-2"><button id="pPrev" class="btn btn-ghost btn-sm">السابق</button><span id="pPage" class="px-3 py-1 font-bold"></span><button id="pNext" class="btn btn-ghost btn-sm">التالي</button></div>
       </div>
     </div>`;
+
+  if (search) c.querySelector('#pSearch').value = search;
 
   const load = async () => {
     const q = new URLSearchParams({ page, page_size: 50, search, category, low_stock: lowOnly ? '1' : '0' });

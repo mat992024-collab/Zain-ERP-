@@ -11,9 +11,9 @@ npm run build:css      # إلزامي بعد أي تعديل على src/web/styl
 npm start              # تشغيل + فتح Edge/Chrome في وضع --app
 npm run serve          # الخادم فقط (المنفذ 4180 أو ZAIN_PORT)
 npm test               # 3 مجموعات: API + رسم شاشات + متصفح حقيقي
-npm run test:api       # tests/e2e.js            (221 فحصاً)
-npm run test:render    # tests/render.test.mjs   (13 فحصاً)
-npm run test:ui        # tests/browser.test.mjs  (103 فحصاً)
+npm run test:api       # tests/e2e.js            (229 فحصاً)
+npm run test:render    # tests/render.test.mjs   (14 فحصاً)
+npm run test:ui        # tests/browser.test.mjs  (109 فحصاً)
 npm run seed           # بيانات تجريبية
 npm run reset          # تصفير القاعدة
 ```
@@ -40,16 +40,16 @@ src/server/index.js          الراوتر + تقديم الملفات الثا
 src/server/schema.js         الجداول + DEFAULT_SETTINGS + INDUSTRY_PRESETS + SYSTEM_ACCOUNTS
 src/server/db.js             الاتصال + bootstrap (admin/admin)
 src/server/core/             http, auth, crud, ledger, code128, csv
-src/server/modules/          17 وحدة مسارات (statements للكشوف, activity لسجل النشاط)
+src/server/modules/          19 وحدة مسارات (statements للكشوف, activity لسجل النشاط, search للبحث السريع)
 src/web/index.html           الصدفة (login + shell + nav + content)
 src/web/js/core.js           state, api, toast, modal, money, esc, field, openPrint, hasPerm, applyTheme, toggleTheme, downloadFile, copyText
 src/web/js/main.js           bootstrap, hash-router, NAV, dashboard, وردية, دخول/خروج
-src/web/js/views/            pos, inventory, contacts, sales, accounting, ai, admin, activity
+src/web/js/views/            pos, inventory, contacts, sales, accounting, ai, admin, activity, search
 src/web/styles.css           مصدر Tailwind (يبني assets/app.css)
 tests/                       e2e.js, render.test.mjs, browser.test.mjs
 ```
 
 ## قبل أي commit
 1. `npm run build:css` إذا لزم.
-2. `npm test` يجب أن يمرّ بالكامل (221 + 13 + 103) بدون console errors.
+2. `npm test` يجب أن يمرّ بالكامل (229 + 14 + 109) بدون console errors.
 3. لا تدفع `data/` أو `node_modules/` (مستثناة في `.gitignore`).

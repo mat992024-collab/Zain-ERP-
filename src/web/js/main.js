@@ -8,6 +8,7 @@ import { renderAi, renderReports } from './views/ai.js';
 import { renderAdmin, openSettings } from './views/admin.js';
 import { renderReminders } from './views/reminders.js';
 import { renderActivity } from './views/activity.js';
+import { openSearchPalette } from './views/search.js';
 
 const NAV = [
   { key: 'dashboard', name: 'لوحة التحكم', icon: 'bi-speedometer2', perm: null, route: 'dashboard' },
@@ -108,7 +109,14 @@ async function enterApp() {
   document.getElementById('posBtnTop').onclick = () => { location.hash = '#/pos'; };
   document.getElementById('refreshBtn').onclick = () => navigate(currentRoute(), true);
   document.getElementById('themeBtn').onclick = () => toggleTheme();
+  document.getElementById('searchBtn').onclick = () => openSearchPalette();
   window.onhashchange = () => navigate(currentRoute());
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      openSearchPalette();
+    }
+  });
   navigate(currentRoute());
 }
 

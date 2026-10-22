@@ -81,6 +81,7 @@ async function main() {
   const ai = await import('../src/web/js/views/ai.js');
   const adm = await import('../src/web/js/views/admin.js');
   const act = await import('../src/web/js/views/activity.js');
+  const sea = await import('../src/web/js/views/search.js');
 
   const jobs = [
     ['pos.render', render],
@@ -96,6 +97,7 @@ async function main() {
     ['ai.renderReports', ai.renderReports],
     ['admin.renderAdmin', adm.renderAdmin],
     ['activity.renderActivity', act.renderActivity],
+    ['search.openSearchPalette', sea.openSearchPalette],
   ];
 
   let pass = 0, fail = 0;

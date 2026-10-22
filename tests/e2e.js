@@ -555,6 +555,23 @@ const { start } = require('../src/server/index.js');
   r = await call('GET', '/api/export/activity', null, token);
   ok('activity export CSV', r.status === 200 && String(r.data).includes('الإجراء'), String(r.status));
 
+  r = await call('GET', '/api/search?q=' + encodeURIComponent('لابتوب'), null, token);
+  ok('search finds products by name', r.status === 200 && r.data.products.length === 1 && r.data.products[0].name.includes('لابتوب'), JSON.stringify(r.data.products.map((x) => x.name)));
+  r = await call('GET', '/api/search?q=B100', null, token);
+  ok('search finds products by barcode', r.status === 200 && r.data.products.length === 1, String(r.data.products.length));
+  r = await call('GET', '/api/search?q=' + encodeURIComponent('الأمل'), null, token);
+  ok('search finds customers', r.status === 200 && r.data.customers.length === 1, String(r.data.customers.length));
+  r = await call('GET', '/api/search?q=' + encodeURIComponent('الأمل'), null, token);
+  ok('search groups results', r.data.total === r.data.products.length + r.data.customers.length + r.data.suppliers.length + r.data.invoices.length, String(r.data.total));
+  r = await call('GET', '/api/search?q=' + encodeURIComponent('ZZZ-NOT-FOUND'), null, token);
+  ok('search without results', r.status === 200 && r.data.total === 0, String(r.data.total));
+  r = await call('GET', '/api/search?q=', null, token);
+  ok('search empty query', r.status === 200 && r.data.total === 0, String(r.data.total));
+  r = await call('GET', '/api/search?q=' + encodeURIComponent('لابتوب'));
+  ok('search requires authentication', r.status === 401, String(r.status));
+  r = await call('GET', '/api/search?q=' + encodeURIComponent('لابتوب'), null, cashierToken);
+  ok('search allowed for cashier', r.status === 200, String(r.status));
+
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

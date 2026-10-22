@@ -29,6 +29,7 @@ const MODULES = [
   require('./modules/backup.routes'),
   require('./modules/reminders.routes'),
   require('./modules/activity.routes'),
+  require('./modules/search.routes'),
 ];
 
 function buildRouter() {
