@@ -78,7 +78,7 @@ module.exports = {
       const days = Math.min(Number(ctx.query.days) || 30, 365);
       let rows = db.all(
         `SELECT p.id, p.name, p.barcode, p.part_number, p.category, p.unit, p.sale_price, p.wholesale_price,
-                p.cost_price, p.quantity, p.reorder_level, p.is_active,
+                p.cost_price, p.quantity, p.reorder_level, p.is_active, p.image,
                 COALESCE(SUM(ii.qty), 0) AS sold
          FROM invoice_items ii
          JOIN invoices i ON i.id = ii.invoice_id
@@ -92,7 +92,7 @@ module.exports = {
       if (!rows.length) {
         rows = db.all(
           `SELECT id, name, barcode, part_number, category, unit, sale_price, wholesale_price,
-                  cost_price, quantity, reorder_level, is_active, 0 AS sold
+                  cost_price, quantity, reorder_level, is_active, image, 0 AS sold
            FROM products WHERE is_active = 1 ORDER BY id DESC LIMIT ?`,
           [limit]
         );

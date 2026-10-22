@@ -63,6 +63,8 @@ const A4_CSS = `
   table.items { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
   table.items th { background: #eef2ff; color: #3730a3; padding: 9px 8px; border: 1px solid #c7d2fe; }
   table.items td { padding: 7px 8px; border: 1px solid #e2e8f0; }
+  .item-cell { display: flex; align-items: center; gap: 7px; }
+  .item-img { width: 30px; height: 30px; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 5px; background: #f8fafc; }
   .totals { width: 320px; margin: 16px 0 0 auto; font-size: 14px; }
   .totals div { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed #cbd5e1; }
   .totals .grand { font-weight: bold; font-size: 17px; border-bottom: 0; color: #4338ca; }
@@ -98,7 +100,7 @@ function fetchInvoice(id) {
     [id]
   );
   if (!invoice) return null;
-  const items = db.all('SELECT * FROM invoice_items WHERE invoice_id = ?', [id]);
+  const items = db.all('SELECT ii.*, p.image AS image FROM invoice_items ii LEFT JOIN products p ON p.id = ii.product_id WHERE ii.invoice_id = ?', [id]);
   const settings = db.getSettings();
   return { invoice, items, settings };
 }
@@ -157,7 +159,7 @@ module.exports = {
         .map(
           (i, idx) => `<tr>
             <td style="width:30px;text-align:center">${idx + 1}</td>
-            <td>${esc(i.name)}</td>
+            <td><div class="item-cell">${i.image ? `<img class="item-img" src="${esc(i.image)}" alt="" />` : ''}<span>${esc(i.name)}</span></div></td>
             <td style="text-align:center">${esc(i.unit || 'قطعة')}</td>
             <td style="text-align:center">${i.qty}</td>
             <td style="text-align:left">${money(invCur.convert(i.unit_price), '')}</td>
@@ -222,8 +224,9 @@ module.exports = {
         const name = (p && p.name) || item.name || '';
         const price = Number((p && p.sale_price) || item.price || 0);
         const sku = (p && (p.part_number || p.sku)) || '';
+        const image = (p && p.image) || '';
         for (let r = 0; r < repeats; r++) {
-          labels.push({ code, name, price, sku });
+          labels.push({ code, name, price, sku, image });
         }
       }
       const css = `
@@ -233,6 +236,8 @@ module.exports = {
         .label { width: ${labelW}mm; height: ${labelH}mm; border: 1px dashed #cbd5e1; padding: 2mm;
                  text-align: center; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; }
         .label .name { font-size: 9px; font-weight: bold; color: #0f172a; line-height: 1.15; max-height: 22px; overflow: hidden; }
+        .label .head { display: flex; align-items: center; gap: 3mm; text-align: right; }
+        .label .head img { width: 10mm; height: 10mm; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 2mm; }
         .label .sku { font-size: 7px; color: #64748b; }
         .label .price { font-size: 10px; font-weight: bold; color: #4338ca; }
         .label svg { display: block; margin: 0 auto; }
@@ -246,7 +251,7 @@ module.exports = {
         ${labels
           .map(
             (l) => `<div class="label">
-              <div class="name">${esc(l.name)}</div>
+              <div class="head">${l.image ? `<img src="${esc(l.image)}" alt="" />` : ''}<div class="name">${esc(l.name)}</div></div>
               ${l.sku ? `<div class="sku">${esc(l.sku)}</div>` : ''}
               <div>${code128.svg(l.code, { width: labelW * 3.4, height: 46, moduleWidth: 1, showText: true, color: '#000' })}</div>
               <div class="price">${money(l.price, settings.currency_symbol || 'د.ع')}</div>

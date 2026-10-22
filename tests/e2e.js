@@ -83,10 +83,14 @@ const { readZip } = require('../src/server/core/zip');
   ok('thermal receipt HTML', r.status === 200 && String(r.data).includes('<!DOCTYPE html>'), String(r.status));
   r = await call('GET', `/api/print/a4/${1}`, null, token);
   ok('A4 invoice HTML', r.status === 200 && String(r.data).includes('فاتورة'), String(r.status));
+  ok('A4 invoice shows product image', String(r.data).includes(imageUrl), 'has=' + String(r.data).includes(imageUrl));
   r = await call('POST', '/api/print/labels', { items: [{ product_id: pid, qty: 2 }], repeats: 2 }, token);
   ok('barcode labels HTML (svg)', r.status === 200 && String(r.data).includes('<svg') && String(r.data).includes('rect'), String(r.status));
+  ok('barcode labels show product image', String(r.data).includes(imageUrl), 'has=' + String(r.data).includes(imageUrl));
   r = await call('GET', `/api/print/barcode/${pid}`, null, token);
   ok('barcode svg endpoint', r.status === 200 && r.data.svg.includes('svg'));
+  r = await call('GET', '/api/products/quick?limit=5', null, token);
+  ok('quick products expose image', r.status === 200 && r.data.rows.some((x) => x.image === imageUrl), JSON.stringify(r.data.rows.map((x) => x.image)));
 
   r = await call('PUT', '/api/settings', {
     company_tax_id: '9876543',

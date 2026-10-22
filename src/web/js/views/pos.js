@@ -183,6 +183,7 @@ function renderQuick() {
   if (!quick.length) { box.innerHTML = '<div class="text-[11px] text-slate-400 py-1">لا توجد أصناف سريعة بعد</div>'; return; }
   box.innerHTML = quick.map((p) => `
     <button data-qid="${p.id}" class="shrink-0 border border-slate-200 rounded-xl px-3 py-2 text-right hover:border-zain-400 hover:bg-zain-50 transition-colors">
+      ${p.image ? `<img src="${esc(p.image)}" alt="${esc(p.name)}" class="w-8 h-8 rounded-lg object-cover border border-slate-200 mb-1" />` : ''}
       <div class="text-[11px] font-bold text-slate-700 max-w-[130px] truncate">${esc(p.name)}</div>
       <div class="text-[11px] font-black text-zain-600 mt-0.5">${money(p.sale_price)}</div>
       <div class="text-[10px] text-slate-400">${p.sold ? `مبيع ${Number(p.sold).toFixed(0)}` : 'جديد'}</div>
