@@ -4,6 +4,7 @@ const { DatabaseSync } = require('node:sqlite');
 const db = require('../db');
 const { sendJson, HttpError } = require('../core/http');
 const { requirePerm } = require('../core/csv');
+const { createZip, readZip, isZip } = require('../core/zip');
 
 const BACKUP_DIR = path.join(db.DATA_DIR, 'backups', path.basename(db.DB_PATH).replace(/\.db$/, ''));
 const MAGIC = 'SQLite format 3';
@@ -43,31 +44,58 @@ function autoState() {
 
 function pruneAuto(keep) {
   if (!fs.existsSync(BACKUP_DIR)) return;
-  const files = fs.readdirSync(BACKUP_DIR).filter((f) => f.startsWith(AUTO_PREFIX) && f.endsWith('.db')).sort();
+  const files = fs.readdirSync(BACKUP_DIR).filter((f) => f.startsWith(AUTO_PREFIX) && (f.endsWith('.zip') || f.endsWith('.db'))).sort();
   const extra = files.length - keep;
   for (let i = 0; i < extra; i++) {
     try { fs.unlinkSync(path.join(BACKUP_DIR, files[i])); } catch { }
   }
 }
 
-function createAutoSnapshot() {
-  const keep = autoState().keep;
+function imageEntries() {
+  if (!fs.existsSync(db.IMAGES_DIR)) return [];
+  const out = [];
+  for (const f of fs.readdirSync(db.IMAGES_DIR)) {
+    const p = path.join(db.IMAGES_DIR, f);
+    if (!fs.statSync(p).isFile()) continue;
+    out.push({ name: `images/${f}`, data: fs.readFileSync(p) });
+  }
+  return out;
+}
+
+function buildSnapshot(prefix) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  const name = `${AUTO_PREFIX}${stamp()}.db`;
+  const tag = stamp();
+  const tmp = path.join(BACKUP_DIR, `tmp-${tag}.db`);
+  if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+  db.conn().exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+  let dbBuffer;
+  try {
+    dbBuffer = fs.readFileSync(tmp);
+  } finally {
+    try { fs.unlinkSync(tmp); } catch { }
+  }
+  const zip = createZip([{ name: 'zain.db', data: dbBuffer }, ...imageEntries()]);
+  const name = `${prefix}${tag}.zip`;
   const file = path.join(BACKUP_DIR, name);
   if (fs.existsSync(file)) fs.unlinkSync(file);
-  db.conn().exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+  fs.writeFileSync(file, zip);
   const stat = fs.statSync(file);
+  return { name, size: stat.size, created_at: stat.mtime.toISOString() };
+}
+
+function createAutoSnapshot() {
+  const keep = autoState().keep;
+  const info = buildSnapshot(AUTO_PREFIX);
   db.setSetting('auto_backup_last', localDate(), 'backup');
   pruneAuto(keep);
-  db.logActivity(null, 'backup_auto', 'system', null, { name, size: stat.size });
-  return { name, size: stat.size, created_at: stat.mtime.toISOString() };
+  db.logActivity(null, 'backup_auto', 'system', null, { name: info.name, size: info.size });
+  return info;
 }
 
 function listBackups() {
   if (!fs.existsSync(BACKUP_DIR)) return [];
   return fs.readdirSync(BACKUP_DIR)
-    .filter((f) => f.endsWith('.db'))
+    .filter((f) => f.endsWith('.zip') || f.endsWith('.db'))
     .map((f) => {
       const stat = fs.statSync(path.join(BACKUP_DIR, f));
       return { name: f, size: stat.size, created_at: stat.mtime.toISOString() };
@@ -77,18 +105,12 @@ function listBackups() {
 
 function safeName(name) {
   const clean = path.basename(String(name || ''));
-  if (!/^zain-(backup|auto)-[0-9A-Za-z-]+\.db$/.test(clean)) throw new HttpError(400, 'اسم النسخة الاحتياطية غير صالح');
+  if (!/^zain-(backup|auto)-[0-9A-Za-z-]+\.(zip|db)$/.test(clean)) throw new HttpError(400, 'اسم النسخة الاحتياطية غير صالح');
   return clean;
 }
 
 function createSnapshot() {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  const name = `zain-backup-${stamp()}.db`;
-  const file = path.join(BACKUP_DIR, name);
-  if (fs.existsSync(file)) fs.unlinkSync(file);
-  db.conn().exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
-  const stat = fs.statSync(file);
-  return { name, size: stat.size, created_at: stat.mtime.toISOString() };
+  return buildSnapshot('zain-backup-');
 }
 
 function validateFile(file) {
@@ -112,14 +134,51 @@ function validateFile(file) {
 }
 
 function applyRestore(sourceFile) {
-  validateFile(sourceFile);
+  const buffer = fs.readFileSync(sourceFile);
+  let dbBuffer = buffer;
+  let hasImages = false;
+  let imageFiles = [];
+  if (isZip(buffer)) {
+    let entries;
+    try {
+      entries = readZip(buffer);
+    } catch {
+      throw new HttpError(400, 'ملف النسخة الاحتياطية تالف');
+    }
+    const dbEntry = entries.find((e) => !e.name.includes('/') && e.name.toLowerCase().endsWith('.db'));
+    if (!dbEntry) throw new HttpError(400, 'الملف لا يحتوي على قاعدة بيانات');
+    dbBuffer = dbEntry.data;
+    hasImages = entries.some((e) => e.name === 'images/' || e.name.startsWith('images/'));
+    imageFiles = entries.filter((e) => e.name.startsWith('images/') && !e.name.endsWith('/'));
+  }
+  fs.mkdirSync(db.DATA_DIR, { recursive: true });
+  const tmp = path.join(db.DATA_DIR, `restore-${Date.now()}.db`);
+  fs.writeFileSync(tmp, dbBuffer);
+  try {
+    validateFile(tmp);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch { }
+    throw err;
+  }
   const target = db.DB_PATH;
   db.close();
   for (const suffix of ['-wal', '-shm']) {
     try { fs.unlinkSync(target + suffix); } catch { }
   }
-  fs.copyFileSync(sourceFile, target);
+  fs.copyFileSync(tmp, target);
+  try { fs.unlinkSync(tmp); } catch { }
   db.init();
+  if (hasImages) {
+    fs.mkdirSync(db.IMAGES_DIR, { recursive: true });
+    for (const f of fs.readdirSync(db.IMAGES_DIR)) {
+      try { fs.unlinkSync(path.join(db.IMAGES_DIR, f)); } catch { }
+    }
+    for (const entry of imageFiles) {
+      const file = path.basename(entry.name);
+      if (!file) continue;
+      fs.writeFileSync(path.join(db.IMAGES_DIR, file), entry.data);
+    }
+  }
 }
 
 module.exports = {
@@ -175,12 +234,35 @@ module.exports = {
       if (!fs.existsSync(file)) throw new HttpError(404, 'النسخة الاحتياطية غير موجودة');
       const stat = fs.statSync(file);
       ctx.res.writeHead(200, {
-        'Content-Type': 'application/octet-stream',
+        'Content-Type': name.endsWith('.zip') ? 'application/zip' : 'application/octet-stream',
         'Content-Length': stat.size,
         'Content-Disposition': `attachment; filename="${name}"`,
         'Cache-Control': 'no-store',
       });
       fs.createReadStream(file).pipe(ctx.res);
+    });
+
+    router.post('/api/backup/upload/restore', (ctx) => {
+      requirePerm(ctx, 'backup.manage');
+      const payload = ctx.body || {};
+      if (!payload.data) throw new HttpError(400, 'لم يتم إرسال ملف');
+      let buffer;
+      try {
+        buffer = Buffer.from(String(payload.data), 'base64');
+      } catch {
+        throw new HttpError(400, 'ملف غير صالح');
+      }
+      if (buffer.length < 100) throw new HttpError(400, 'الملف فارغ أو غير صالح');
+      fs.mkdirSync(db.DATA_DIR, { recursive: true });
+      const tmp = path.join(db.DATA_DIR, `upload-${Date.now()}${isZip(buffer) ? '.zip' : '.db'}`);
+      fs.writeFileSync(tmp, buffer);
+      try {
+        applyRestore(tmp);
+      } finally {
+        try { fs.unlinkSync(tmp); } catch { }
+      }
+      db.logActivity(ctx.user.id, 'restore', 'system', null, { source: 'upload' });
+      sendJson(ctx.res, 200, { ok: true, restored: 'uploaded-file' });
     });
 
     router.post('/api/backup/:name/restore', (ctx) => {
@@ -200,29 +282,6 @@ module.exports = {
       if (!fs.existsSync(file)) throw new HttpError(404, 'النسخة الاحتياطية غير موجودة');
       fs.unlinkSync(file);
       sendJson(ctx.res, 200, { ok: true, backups: listBackups() });
-    });
-
-    router.post('/api/backup/upload/restore', (ctx) => {
-      requirePerm(ctx, 'backup.manage');
-      const payload = ctx.body || {};
-      if (!payload.data) throw new HttpError(400, 'لم يتم إرسال ملف');
-      let buffer;
-      try {
-        buffer = Buffer.from(String(payload.data), 'base64');
-      } catch {
-        throw new HttpError(400, 'ملف غير صالح');
-      }
-      if (buffer.length < 100) throw new HttpError(400, 'الملف فارغ أو غير صالح');
-      fs.mkdirSync(db.DATA_DIR, { recursive: true });
-      const tmp = path.join(db.DATA_DIR, `upload-${Date.now()}.db`);
-      fs.writeFileSync(tmp, buffer);
-      try {
-        applyRestore(tmp);
-      } finally {
-        try { fs.unlinkSync(tmp); } catch { }
-      }
-      db.logActivity(ctx.user.id, 'restore', 'system', null, { source: 'upload' });
-      sendJson(ctx.res, 200, { ok: true, restored: 'uploaded-file' });
     });
   },
 };

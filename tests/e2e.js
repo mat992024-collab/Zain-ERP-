@@ -3,6 +3,7 @@ const fs = require('node:fs');
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(process.env.ZAIN_DB + s); } catch {} }
 
 const { start } = require('../src/server/index.js');
+const { readZip } = require('../src/server/core/zip');
 
 (async () => {
   const { server, port } = await start(4202);
@@ -49,6 +50,17 @@ const { start } = require('../src/server/index.js');
   r = await call('POST', '/api/products', { name: 'لابتوب Lenovo', category: 'إلكترونيات', barcode: 'B100', sale_price: 500000, cost_price: 400000, quantity: 20, reorder_level: 3, part_number: 'LN-01' }, token);
   const pid = r.data.product.id;
   ok('create product', r.status === 201);
+
+  const pngDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+  r = await call('POST', `/api/products/${pid}/image`, { data_url: pngDataUrl }, token);
+  ok('upload product image', r.status === 200 && String(r.data.product.image).startsWith('/images/'), JSON.stringify(r.data));
+  const imageUrl = r.data.product.image;
+  const imageRes = await raw(imageUrl);
+  ok('product image is served', imageRes.status === 200 && String(imageRes.headers.get('content-type')).startsWith('image/'), String(imageRes.status));
+  r = await call('GET', '/api/products', null, token);
+  ok('product list exposes image url', r.data.rows.find((x) => x.id === pid).image === imageUrl, JSON.stringify(r.data.rows.find((x) => x.id === pid).image));
+  r = await call('POST', `/api/products/${pid}/image`, { data_url: 'data:text/html;base64,PHNjcmlwdD4=' }, token);
+  ok('invalid image rejected', r.status === 400, String(r.status));
 
   r = await call('POST', '/api/customers', { name: 'شركة الأمل', type: 'wholesale', phone: '077' }, token);
   const cid = r.data.customer.id;
@@ -403,6 +415,12 @@ const { start } = require('../src/server/index.js');
   r = await call('POST', '/api/backup', null, token);
   const backupName = r.data.backup && r.data.backup.name;
   ok('backup created', r.status === 201 && !!backupName && r.data.backup.size > 1000, JSON.stringify(r.data.backup));
+  ok('backup archive is zip', backupName.endsWith('.zip'), backupName);
+  const dl = await raw(`/api/backup/${encodeURIComponent(backupName)}/download`, { headers: { Authorization: 'Bearer ' + token } });
+  const archive = Buffer.from(await dl.arrayBuffer());
+  const entries = readZip(archive);
+  ok('backup archive contains database', entries.some((e) => e.name === 'zain.db'), entries.map((e) => e.name).join(','));
+  ok('backup archive contains product images', entries.some((e) => e.name.startsWith('images/')), entries.map((e) => e.name).join(','));
   r = await call('GET', `/api/backup/${encodeURIComponent(backupName)}/download`, null, token);
   ok('backup download', r.status === 200 && String(r.data).length > 1000, r.status);
   r = await call('GET', '/api/backup', null, cashierToken);
@@ -418,6 +436,12 @@ const { start } = require('../src/server/index.js');
   ok('data intact after restore', r.data.total === beforeRestore, `${beforeRestore} -> ${r.data.total}`);
   r = await call('GET', '/api/auth/me', null, token);
   ok('session alive after restore', r.status === 200, String(r.status));
+  const imgAfterRestore = await raw(imageUrl);
+  ok('product image intact after restore', imgAfterRestore.status === 200, String(imgAfterRestore.status));
+  r = await call('POST', '/api/backup/upload/restore', { data: archive.toString('base64') }, token);
+  ok('restore from uploaded archive', r.status === 200 && r.data.ok === true, JSON.stringify(r.data));
+  const imgAfterUpload = await raw(imageUrl);
+  ok('product image restored from uploaded archive', imgAfterUpload.status === 200, String(imgAfterUpload.status));
   r = await call('DELETE', `/api/backup/${encodeURIComponent(backupName)}`, null, token);
   ok('backup deleted', r.status === 200 && !r.data.backups.some((b) => b.name === backupName), JSON.stringify(r.data.backups.map((b) => b.name)));
 
@@ -572,16 +596,6 @@ const { start } = require('../src/server/index.js');
   r = await call('GET', '/api/search?q=' + encodeURIComponent('لابتوب'), null, cashierToken);
   ok('search allowed for cashier', r.status === 200, String(r.status));
 
-  const pngDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
-  r = await call('POST', `/api/products/${pid}/image`, { data_url: pngDataUrl }, token);
-  ok('upload product image', r.status === 200 && String(r.data.product.image).startsWith('/images/'), JSON.stringify(r.data));
-  const imageUrl = r.data.product.image;
-  const imageRes = await raw(imageUrl);
-  ok('product image is served', imageRes.status === 200 && String(imageRes.headers.get('content-type')).startsWith('image/'), String(imageRes.status));
-  r = await call('GET', '/api/products', null, token);
-  ok('product list exposes image url', r.data.rows.find((x) => x.id === pid).image === imageUrl, JSON.stringify(r.data.rows.find((x) => x.id === pid).image));
-  r = await call('POST', `/api/products/${pid}/image`, { data_url: 'data:text/html;base64,PHNjcmlwdD4=' }, token);
-  ok('invalid image rejected', r.status === 400, String(r.status));
   r = await call('POST', `/api/products/${pid}/image`, { data_url: pngDataUrl }, cashierToken);
   ok('product image requires permission', r.status === 403, String(r.status));
   r = await call('DELETE', `/api/products/${pid}/image`, null, token);
@@ -589,7 +603,6 @@ const { start } = require('../src/server/index.js');
   r = await raw(imageUrl);
   ok('product image removed from disk', r.status === 404, String(r.status));
 
-  server.close();
-  console.log(`\n${pass} passed, ${fail} failed`);
+  server.close();  console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FAIL', e); process.exit(1); });

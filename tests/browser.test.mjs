@@ -482,6 +482,10 @@ async function main() {
   await sleep(2500);
   const bkRows = await evalJs(`document.querySelectorAll('#backupCard [data-bk-dl]').length`);
   check('backup snapshot created and listed', bkRows >= 1, 'rows=' + bkRows);
+  const bkName = await evalJs(`(function(){const b=document.querySelector('#backupCard [data-bk-dl]');return b?b.dataset.bkDl:''})()`);
+  check('backup snapshot is zip archive', bkName.endsWith('.zip'), bkName);
+  const bkZip = await evalJs(`fetch('/api/backup/'+encodeURIComponent(${JSON.stringify(bkName)})+'/download',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.arrayBuffer()).then(b=>new Uint8Array(b).slice(0,2).join(','))`, true);
+  check('backup download returns zip signature', bkZip === '80,75', bkZip);
 
   phase = 'reminders';
   await evalJs(`location.hash = '#/reminders'`);

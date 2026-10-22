@@ -212,7 +212,7 @@ export async function renderAdmin(c) {
         <div class="p-4 flex justify-between items-center border-b border-slate-100">
           <div class="font-black flex items-center gap-2"><i class="bi bi-database-check text-zain-600"></i> النسخ الاحتياطي والاستعادة</div>
           <div class="flex gap-2">
-            <label class="btn btn-ghost cursor-pointer"><i class="bi bi-upload"></i> استعادة من ملف<input type="file" id="bkUpload" accept=".db,application/octet-stream" class="hidden" /></label>
+            <label class="btn btn-ghost cursor-pointer"><i class="bi bi-upload"></i> استعادة من ملف<input type="file" id="bkUpload" accept=".db,.zip,application/octet-stream,application/zip" class="hidden" /></label>
             <button id="bkCreate" class="btn btn-primary"><i class="bi bi-download"></i> نسخة احتياطية الآن</button>
           </div>
         </div>
@@ -228,7 +228,7 @@ export async function renderAdmin(c) {
           </div>
         </div>
         <div class="p-4">
-          <p class="text-xs text-slate-500 mb-3">تُحفظ النسخ داخل مجلد <span class="font-mono">data/backups</span> على هذا الجهاز. حجم القاعدة الحالية: ${(res.db_size / 1024).toFixed(0)} كيلوبايت.</p>
+          <p class="text-xs text-slate-500 mb-3">تُحفظ النسخ داخل مجلد <span class="font-mono">data/backups</span> على هذا الجهاز. كل نسخة ملف <span class="font-mono">zip</span> يضم قاعدة البيانات وصور الأصناف. حجم القاعدة الحالية: ${(res.db_size / 1024).toFixed(0)} كيلوبايت.</p>
           ${rows.length ? `<div class="overflow-auto max-h-64"><table class="w-full">
             <thead><tr><th class="th">الملف</th><th class="th">النوع</th><th class="th">التاريخ</th><th class="th">الحجم</th><th class="th"></th></tr></thead>
             <tbody>${rows.map((b) => `<tr class="tr">

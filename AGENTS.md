@@ -11,9 +11,9 @@ npm run build:css      # إلزامي بعد أي تعديل على src/web/styl
 npm start              # تشغيل + فتح Edge/Chrome في وضع --app
 npm run serve          # الخادم فقط (المنفذ 4180 أو ZAIN_PORT)
 npm test               # 3 مجموعات: API + رسم شاشات + متصفح حقيقي
-npm run test:api       # tests/e2e.js            (236 فحصاً)
+npm run test:api       # tests/e2e.js            (242 فحصاً)
 npm run test:render    # tests/render.test.mjs   (14 فحصاً)
-npm run test:ui        # tests/browser.test.mjs  (114 فحصاً)
+npm run test:ui        # tests/browser.test.mjs  (116 فحصاً)
 npm run seed           # بيانات تجريبية
 npm run reset          # تصفير القاعدة
 ```
@@ -39,7 +39,7 @@ src/launcher.js              مشغّل التطبيق (يفتح المتصفح 
 src/server/index.js          الراوتر + تقديم الملفات الثابتة
 src/server/schema.js         الجداول + DEFAULT_SETTINGS + INDUSTRY_PRESETS + SYSTEM_ACCOUNTS
 src/server/db.js             الاتصال + bootstrap (admin/admin)
-src/server/core/             http, auth, crud, ledger, code128, csv
+src/server/core/             http, auth, crud, ledger, code128, csv, zip
 src/server/modules/          19 وحدة مسارات (statements للكشوف, activity لسجل النشاط, search للبحث السريع)
 src/web/index.html           الصدفة (login + shell + nav + content)
 src/web/js/core.js           state, api, toast, modal, money, esc, field, openPrint, hasPerm, applyTheme, toggleTheme, downloadFile, copyText
@@ -51,6 +51,7 @@ tests/                       e2e.js, render.test.mjs, browser.test.mjs
 
 ## قبل أي commit
 1. `npm run build:css` إذا لزم.
-2. `npm test` يجب أن يمرّ بالكامل (236 + 14 + 114) بدون console errors.
+2. `npm test` يجب أن يمرّ بالكامل (242 + 14 + 116) بدون console errors.
 3. لا تدفع `data/` أو `node_modules/` (مستثناة في `.gitignore`).
 4. صور الأصناف تُحفظ على القرص في `data/images/` وتُقدَّم من `/images/*`؛ لا تُخزَّن base64 في قاعدة البيانات.
+5. النسخ الاحتياطي = أرشيف zip (بلا ضغط) يضم `zain.db` و`images/*` عبر `src/server/core/zip.js`؛ لا تُضاف اعتماديات خارجية.
