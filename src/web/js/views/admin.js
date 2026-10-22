@@ -122,6 +122,28 @@ export async function renderAdmin(c) {
       await renderAdmin(c);
     } catch (e) { toast(e.message, 'error'); bkAutoRun.disabled = false; }
   });
+  const bkExtSave = c.querySelector('#bkExtSave');
+  if (bkExtSave) bkExtSave.addEventListener('click', async () => {
+    bkExtSave.disabled = true;
+    try {
+      await api('PUT', '/api/backup/external', {
+        enabled: c.querySelector('#bkExtEnabled').checked ? 1 : 0,
+        dir: c.querySelector('#bkExtDir').value,
+        keep: Number(c.querySelector('#bkExtKeep').value),
+      });
+      toast('تم حفظ مسار النسخ الخارجي', 'success');
+      await renderAdmin(c);
+    } catch (e) { toast(e.message, 'error'); bkExtSave.disabled = false; }
+  });
+  const bkExtRun = c.querySelector('#bkExtRun');
+  if (bkExtRun) bkExtRun.addEventListener('click', async () => {
+    bkExtRun.disabled = true;
+    try {
+      await api('POST', '/api/backup/external/run');
+      toast('تم نسخ النسخة الاحتياطية إلى المسار الخارجي', 'success');
+      await renderAdmin(c);
+    } catch (e) { toast(e.message, 'error'); bkExtRun.disabled = false; }
+  });
 
   const uploadInput = c.querySelector('#bkUpload');
   if (uploadInput) uploadInput.addEventListener('change', async () => {
@@ -207,6 +229,7 @@ export async function renderAdmin(c) {
   function backupCard(res) {
     const rows = res.backups || [];
     const auto = res.auto || { enabled: false, time: '02:00', keep: 7, last: '', next: '' };
+    const ext = res.external || { enabled: false, dir: '', keep: 5, count: 0, last: '', error: '', exists: false, writable: false };
     return `
       <div class="card mt-4" id="backupCard">
         <div class="p-4 flex justify-between items-center border-b border-slate-100">
@@ -225,6 +248,17 @@ export async function renderAdmin(c) {
             <button id="bkAutoSave" class="btn btn-ghost btn-sm"><i class="bi bi-check2"></i> حفظ</button>
             <button id="bkAutoRun" class="btn btn-ghost btn-sm"><i class="bi bi-play-fill"></i> تشغيل الآن</button>
             <div class="text-xs text-slate-500 w-full">آخر نسخة تلقائية: <span class="font-bold">${esc(auto.last || 'لا يوجد')}</span> — النسخة القادمة: <span class="font-bold">${auto.next ? esc(new Date(auto.next).toLocaleString('ar-IQ')) : '-'}</span></div>
+          </div>
+        </div>
+        <div class="p-4 border-b border-slate-100 bg-slate-50">
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="font-black text-sm"><i class="bi bi-hdd-network text-zain-600"></i> النسخ إلى وسيط خارجي</div>
+            <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" id="bkExtEnabled" ${ext.enabled ? 'checked' : ''} class="w-4 h-4 accent-zain-600" /> تفعيل</label>
+            <div class="flex items-center gap-2 text-sm flex-1 min-w-64"><span class="text-slate-500">المجلد</span><input id="bkExtDir" class="field !w-full" placeholder="E:\\ZainBackup" value="${esc(ext.dir || '')}" /></div>
+            <div class="flex items-center gap-2 text-sm"><span class="text-slate-500">عدد النسخ</span><input type="number" id="bkExtKeep" min="1" max="90" class="field !w-20" value="${esc(String(ext.keep || 5))}" /></div>
+            <button id="bkExtSave" class="btn btn-ghost btn-sm"><i class="bi bi-check2"></i> حفظ</button>
+            <button id="bkExtRun" class="btn btn-ghost btn-sm"><i class="bi bi-copy"></i> نسخ الآن</button>
+            <div class="text-xs text-slate-500 w-full">النسخ الموجودة هناك: <span class="font-bold">${ext.count}</span>${ext.last ? ` — آخر نسخ: <span class="font-bold">${esc(new Date(ext.last).toLocaleString('ar-IQ'))}</span>` : ''}${ext.error ? ` — <span class="text-rose-600 font-bold">${esc(ext.error)}</span>` : ''}</div>
           </div>
         </div>
         <div class="p-4">

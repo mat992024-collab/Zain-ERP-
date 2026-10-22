@@ -1,7 +1,10 @@
-process.env.ZAIN_DB = require('node:path').join(__dirname, '..', 'data', 'e2e.db');
+process.env.ZAIN_DB = require('node:path').join(__dirname, '..', 'data', 'test', 'e2e.db');
 const fs = require('node:fs');
 const path = require('node:path');
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(process.env.ZAIN_DB + s); } catch {} }
+for (const d of [path.join(__dirname, '..', 'data', 'test', 'backups'), path.join(__dirname, '..', 'data', 'test', 'images')]) {
+  try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+}
 
 const { start } = require('../src/server/index.js');
 const { readZip } = require('../src/server/core/zip');
@@ -432,6 +435,26 @@ const { readZip } = require('../src/server/core/zip');
   ok('backup denied without permission (403)', r.status === 403, String(r.status));
   r = await call('POST', '/api/backup/upload/restore', { data: Buffer.from('not a database').toString('base64') }, token);
   ok('restore rejects invalid file (400)', r.status === 400, String(r.status));
+
+  const extDir = path.join(path.dirname(process.env.ZAIN_DB), 'ext-backups');
+  r = await call('PUT', '/api/backup/external', { enabled: 1, dir: extDir, keep: 3 }, token);
+  ok('external backup settings saved', r.status === 200 && r.data.external.enabled === true && r.data.external.dir === extDir && r.data.external.writable === true, JSON.stringify(r.data.external));
+  r = await call('PUT', '/api/backup/external', { dir: path.join(extDir, 'bad\0name') }, token);
+  ok('invalid external path rejected (400)', r.status === 400, String(r.status));
+  r = await call('POST', '/api/backup/external/run', null, token);
+  ok('external copy executed', r.status === 201 && r.data.external.count >= 1, JSON.stringify(r.data.external));
+  const extFiles = fs.existsSync(extDir) ? fs.readdirSync(extDir).filter((f) => f.endsWith('.zip')) : [];
+  ok('external archive written to disk', extFiles.length >= 1, extFiles.join(','));
+  const extEntries = extFiles.length ? readZip(fs.readFileSync(path.join(extDir, extFiles[0]))) : [];
+  ok('external archive contains database', extEntries.some((e) => e.name === 'zain.db'), extEntries.map((e) => e.name).join(','));
+  r = await call('POST', '/api/backup', null, token);
+  ok('manual backup copies to external dir', r.data.backup && r.data.backup.external && r.data.backup.external.copied === true, JSON.stringify(r.data.backup && r.data.backup.external));
+  r = await call('PUT', '/api/backup/external', { enabled: 0 }, token);
+  ok('external backup disabled', r.status === 200 && r.data.external.enabled === false, JSON.stringify(r.data.external));
+  r = await call('POST', '/api/backup/external/run', null, token);
+  ok('external copy blocked when disabled (400)', r.status === 400, String(r.status));
+  r = await call('PUT', '/api/backup/external', { enabled: 1, dir: extDir }, cashierToken);
+  ok('external backup requires permission (403)', r.status === 403, String(r.status));
 
   r = await call('GET', '/api/products', null, token);
   const beforeRestore = r.data.total;

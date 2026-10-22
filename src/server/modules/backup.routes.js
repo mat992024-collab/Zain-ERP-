@@ -62,6 +62,72 @@ function imageEntries() {
   return out;
 }
 
+function externalState() {
+  const enabled = db.getSetting('backup_external_enabled', '0') === '1';
+  const dir = String(db.getSetting('backup_external_dir', '') || '').trim();
+  const keep = Math.max(1, Math.min(Number(db.getSetting('backup_external_keep', '5')) || 5, 90));
+  let exists = false;
+  let writable = false;
+  let count = 0;
+  if (dir) {
+    exists = fs.existsSync(dir);
+    if (exists) {
+      try {
+        fs.accessSync(dir, fs.constants.W_OK);
+        writable = true;
+      } catch {
+        writable = false;
+      }
+      try {
+        count = fs.readdirSync(dir).filter((f) => /^zain-(backup|auto)-[0-9A-Za-z-]+\.zip$/.test(f)).length;
+      } catch {
+        count = 0;
+      }
+    }
+  }
+  return {
+    enabled,
+    dir,
+    keep,
+    exists,
+    writable,
+    count,
+    last: db.getSetting('backup_external_last', ''),
+    error: db.getSetting('backup_external_error', ''),
+  };
+}
+
+function pruneExternal(dir, keep) {
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => /^zain-(backup|auto)-[0-9A-Za-z-]+\.zip$/.test(f)).sort();
+  } catch {
+    return 0;
+  }
+  const extra = files.length - keep;
+  for (let i = 0; i < extra; i++) {
+    try { fs.unlinkSync(path.join(dir, files[i])); } catch { }
+  }
+  return Math.max(0, files.length - extra);
+}
+
+function copyExternal(file) {
+  const state = externalState();
+  if (!state.enabled || !state.dir) return { copied: false, reason: 'disabled' };
+  try {
+    fs.mkdirSync(state.dir, { recursive: true });
+    const target = path.join(state.dir, path.basename(file));
+    fs.copyFileSync(file, target);
+    pruneExternal(state.dir, state.keep);
+    db.setSetting('backup_external_last', new Date().toISOString(), 'backup');
+    db.setSetting('backup_external_error', '', 'backup');
+    return { copied: true, path: target };
+  } catch (err) {
+    db.setSetting('backup_external_error', String(err.message || err), 'backup');
+    return { copied: false, reason: String(err.message || err) };
+  }
+}
+
 function buildSnapshot(prefix) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const tag = stamp();
@@ -80,7 +146,8 @@ function buildSnapshot(prefix) {
   if (fs.existsSync(file)) fs.unlinkSync(file);
   fs.writeFileSync(file, zip);
   const stat = fs.statSync(file);
-  return { name, size: stat.size, created_at: stat.mtime.toISOString() };
+  const external = copyExternal(file);
+  return { name, size: stat.size, created_at: stat.mtime.toISOString(), external };
 }
 
 function createAutoSnapshot() {
@@ -193,7 +260,47 @@ module.exports = {
         db_path: db.DB_PATH,
         db_size: fs.existsSync(db.DB_PATH) ? fs.statSync(db.DB_PATH).size : 0,
         auto: autoState(),
+        external: externalState(),
       });
+    });
+
+    router.put('/api/backup/external', (ctx) => {
+      requirePerm(ctx, 'backup.manage');
+      const body = ctx.body || {};
+      if (body.enabled !== undefined) db.setSetting('backup_external_enabled', body.enabled ? '1' : '0', 'backup');
+      if (body.dir !== undefined) {
+        const dir = String(body.dir || '').trim();
+        if (dir) {
+          try {
+            fs.mkdirSync(dir, { recursive: true });
+            fs.accessSync(dir, fs.constants.W_OK);
+          } catch (err) {
+            throw new HttpError(400, 'تعذر استخدام المسار: ' + String(err.message || err));
+          }
+        }
+        db.setSetting('backup_external_dir', dir, 'backup');
+      }
+      if (body.keep !== undefined) {
+        const keep = Number(body.keep);
+        if (!Number.isInteger(keep) || keep < 1 || keep > 90) throw new HttpError(400, 'عدد النسخ المحفوظة يجب أن يكون بين 1 و 90');
+        db.setSetting('backup_external_keep', keep, 'backup');
+      }
+      db.logActivity(ctx.user.id, 'update', 'backup_external', null, { enabled: body.enabled, dir: body.dir, keep: body.keep });
+      sendJson(ctx.res, 200, { ok: true, external: externalState(), backups: listBackups() });
+    });
+
+    router.post('/api/backup/external/run', (ctx) => {
+      requirePerm(ctx, 'backup.manage');
+      const state = externalState();
+      if (!state.enabled) throw new HttpError(400, 'النسخ إلى المسار الخارجي غير مفعّل');
+      if (!state.dir) throw new HttpError(400, 'لم يتم تحديد مسار خارجي');
+      const backups = listBackups();
+      if (!backups.length) throw new HttpError(400, 'لا توجد نسخة احتياطية لنقلها');
+      const file = path.join(BACKUP_DIR, backups[0].name);
+      const result = copyExternal(file);
+      if (!result.copied) throw new HttpError(400, 'تعذر النسخ: ' + result.reason);
+      db.logActivity(ctx.user.id, 'backup_external', 'system', null, { name: backups[0].name, path: result.path });
+      sendJson(ctx.res, 201, { ok: true, external: externalState(), backup: backups[0] });
     });
 
     router.put('/api/backup/auto', (ctx) => {

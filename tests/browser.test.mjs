@@ -14,11 +14,14 @@ const CHROME = [
 const PORT = 4197;
 const DEBUG = 9300 + Math.floor(Math.random() * 400);
 const BASE = `http://127.0.0.1:${PORT}`;
-const DB = path.join(ROOT, 'data', 'ui-test.db');
+const DB = path.join(ROOT, 'data', 'test', 'ui-test.db');
 const udd = path.join(os.tmpdir(), 'zain-cdp-' + Date.now());
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(DB + s); } catch {} }
+for (const d of [path.join(ROOT, 'data', 'test', 'backups'), path.join(ROOT, 'data', 'test', 'images')]) {
+  try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+}
 
 if (!CHROME) {
   console.log('SKIP  browser test: no Chrome/Edge binary found');
@@ -171,7 +174,7 @@ async function main() {
     phase = route;
     const before = errors.length;
     await evalJs(`location.hash = '#/${route}'`);
-    await sleep(900);
+    await waitFor(`document.getElementById('content').innerText.trim().length > 20`, 40);
     const cur = await evalJs(`document.getElementById('pageTitle').textContent`);
     const len = await evalJs(`document.getElementById('content').innerText.trim().length`);
     const newErrs = errors.length - before;
@@ -181,7 +184,7 @@ async function main() {
 
   phase = 'pos-flow';
   await evalJs(`location.hash = '#/pos'`);
-  await sleep(1200);
+  await waitFor(`!!document.querySelector('#productGrid [data-id]')`, 40);
   const gridCards = await evalJs(`document.querySelectorAll('#productGrid [data-id]').length`);
   check('pos product grid populated', gridCards > 0, 'cards=' + gridCards);
   await waitFor(`!!document.querySelector('#productGrid [data-id]')`, 40);
@@ -486,6 +489,14 @@ async function main() {
   check('backup snapshot is zip archive', bkName.endsWith('.zip'), bkName);
   const bkZip = await evalJs(`fetch('/api/backup/'+encodeURIComponent(${JSON.stringify(bkName)})+'/download',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.arrayBuffer()).then(b=>new Uint8Array(b).slice(0,2).join(','))`, true);
   check('backup download returns zip signature', bkZip === '80,75', bkZip);
+  const extBox = await evalJs(`(function(){const el=document.getElementById('bkExtDir');return el?'yes':'no'})()`);
+  check('external backup section rendered', extBox === 'yes', extBox);
+  await evalJs(`(function(){const d=document.getElementById('bkExtDir');d.value='data/ext-ui';document.getElementById('bkExtEnabled').checked=true;})()`);
+  await evalJs(`document.getElementById('bkExtSave').click()`);
+  await sleep(2000);
+  const extState = await evalJs(`fetch('/api/backup',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.external)`, true);
+  check('external backup saved from UI', extState && extState.enabled === true && extState.dir === 'data/ext-ui', JSON.stringify(extState));
+  await evalJs(`fetch('/api/backup/external',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({enabled:0})})`, true);
 
   phase = 'reminders';
   await evalJs(`location.hash = '#/reminders'`);

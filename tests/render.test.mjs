@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 4199;
 const BASE = `http://127.0.0.1:${PORT}`;
-const DB = path.join(ROOT, 'data', 'render-test.db');
+const DB = path.join(ROOT, 'data', 'test', 'render-test.db');
 
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(DB + s); } catch {} }
 
