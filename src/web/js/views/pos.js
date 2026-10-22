@@ -29,6 +29,7 @@ export async function render(c) {
     api('GET', '/api/products?page_size=300').then((r) => r.rows).catch(() => []),
     api('GET', '/api/customers?page_size=300').then((r) => r.rows).catch(() => []),
   ]);
+  await loadCurrencies();
   const [q, l] = await Promise.all([
     api('GET', '/api/products/quick?limit=12').then((r) => r.rows).catch(() => []),
     api('GET', '/api/products/low-stock?limit=12').then((r) => r.rows).catch(() => []),
@@ -186,6 +187,7 @@ function renderQuick() {
       ${p.image ? `<img src="${esc(p.image)}" alt="${esc(p.name)}" class="w-8 h-8 rounded-lg object-cover border border-slate-200 mb-1" />` : ''}
       <div class="text-[11px] font-bold text-slate-700 max-w-[130px] truncate">${esc(p.name)}</div>
       <div class="text-[11px] font-black text-zain-600 mt-0.5">${money(p.sale_price)}</div>
+      ${foreignChips(p)}
       <div class="text-[10px] text-slate-400">${p.sold ? `مبيع ${Number(p.sold).toFixed(0)}` : 'جديد'}</div>
     </button>`).join('');
   box.querySelectorAll('[data-qid]').forEach((btn) => {
@@ -251,6 +253,7 @@ function renderGrid(term) {
           <span class="font-black text-zain-600">${money(p.sale_price)}</span>
           <span class="badge ${p.quantity <= p.reorder_level ? 'badge-warn' : 'badge-mute'}">${p.quantity}</span>
         </div>
+        ${foreignChips(p)}
       </button>`)
     .join('');
   grid.querySelectorAll('[data-id]').forEach((btn) => {
@@ -270,6 +273,22 @@ function priceFor(p) {
   const mode = state.cartMeta.pos_mode;
   if (mode === 'wholesale' && Number(p.wholesale_price)) return Number(p.wholesale_price);
   return Number(p.sale_price);
+}
+
+function foreignPriceOf(p, code, fallback) {
+  const pr = p && p.prices ? p.prices[code] : null;
+  if (pr && Number(pr.sale_price) > 0) return Number(pr.sale_price);
+  return Number(fallback) || 0;
+}
+
+function foreignChips(p) {
+  const codes = Object.keys(p.prices || {});
+  if (!codes.length) return '';
+  return `<div class="flex gap-1 flex-wrap mt-1">${codes.map((code) => {
+    const c = currencies.find((x) => x.code === code);
+    const val = roundTo(Number(p.prices[code].sale_price) || 0, c ? c.decimals : 2);
+    return `<span class="badge badge-mute">${esc(code)} ${esc(String(val))}</span>`;
+  }).join('')}</div>`;
 }
 
 export function addProduct(p) {
@@ -541,9 +560,28 @@ function openPaymentModal(t) {
       const baseLine = wrap.querySelector('#payBaseLine');
       const curOf = () => currencies.find((c) => c.code === (curSel ? curSel.value : base.code)) || base;
       const isForeign = () => !curOf().is_base;
+      const itemPriceIn = (item, c) => {
+        const p = products.find((x) => Number(x.id) === Number(item.product_id));
+        return foreignPriceOf(p, c.code, item.unit_price);
+      };
+      const totalsIn = (c) => {
+        if (c.is_base) {
+          return { sub: t.sub, itemsDisc: t.itemsDisc, invDisc: Number(state.cartMeta.discount || 0), tax: t.tax, total: t.total };
+        }
+        const rate = Number(c.rate) || 1;
+        const conv = (v) => (Number(v) || 0) / rate;
+        let sub = 0;
+        for (const item of state.cart) sub += itemPriceIn(item, c) * item.qty;
+        const itemsDisc = state.cart.reduce((s, i) => s + conv(i.discount), 0);
+        const invDisc = conv(Number(state.cartMeta.discount || 0));
+        const tax = taxMode() === 'inclusive' ? 0 : conv(t.tax);
+        const total = sub - itemsDisc - invDisc + tax;
+        return { sub, itemsDisc, invDisc, tax, total };
+      };
       const totalIn = () => {
         const c = curOf();
-        return isForeign() ? roundTo(t.total / (Number(c.rate) || 1), c.decimals) : t.total;
+        const v = totalsIn(c);
+        return c.is_base ? v.total : roundTo(v.total, c.decimals);
       };
       const symbolOf = () => {
         const c = curOf();
@@ -553,7 +591,9 @@ function openPaymentModal(t) {
         const cur = curOf();
         const totalF = totalIn();
         totalBox.textContent = money(totalF, symbolOf());
-        baseLine.textContent = isForeign() ? `يعادل ${money(t.total)} بسعر 1 ${esc(cur.code)} = ${Number(cur.rate) || 1} ${esc(base.code)}` : '';
+        const rate = Number(cur.rate) || 1;
+        const baseEquivalent = cur.is_base ? t.total : roundTo(totalsIn(cur).total * rate, 2);
+        baseLine.textContent = isForeign() ? `يعادل ${money(baseEquivalent)} بسعر 1 ${esc(cur.code)} = ${rate} ${esc(base.code)}` : '';
         const paid = Number(amount.value) || 0;
         changeBox.innerHTML = paid >= totalF
           ? `<span class="text-emerald-600 font-bold">المتبقي للعميل: ${money(paid - totalF, symbolOf())}</span>`
@@ -581,15 +621,21 @@ function openPaymentModal(t) {
         const cur = curOf();
         const rate = Number(cur.rate) || 1;
         const paidBase = isForeign() ? roundTo(paidForeign * rate, 4) : paidForeign;
+        const items = state.cart.map((i) => ({
+          product_id: i.product_id,
+          qty: i.qty,
+          unit_price: isForeign() ? roundTo(itemPriceIn(i, cur) * rate, 4) : i.unit_price,
+          discount: i.discount,
+        }));
         try {
-          const res = await submitSale(method, paidBase, false, cur.code, paidForeign);
+          const res = await submitSale(method, paidBase, false, cur.code, paidForeign, items);
           close();
           await afterSale(res);
         } catch (err) {
           if (err.code === 'CREDIT_LIMIT') {
             creditLimitWarning(err.details || {}, async () => {
               try {
-                const res = await submitSale(method, paidBase, true, cur.code, paidForeign);
+                const res = await submitSale(method, paidBase, true, cur.code, paidForeign, items);
                 close();
                 await afterSale(res);
               } catch (e2) { toast(e2.message, 'error'); }
@@ -603,9 +649,9 @@ function openPaymentModal(t) {
   });
 }
 
-function submitSale(method, paid, force, currencyCode, paidOriginal) {
+function submitSale(method, paid, force, currencyCode, paidOriginal, itemsOverride) {
   return api('POST', '/api/sales', {
-    items: state.cart.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_price: i.unit_price, discount: i.discount })),
+    items: itemsOverride || state.cart.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_price: i.unit_price, discount: i.discount })),
     customer_id: state.cartMeta.customer_id || null,
     pos_mode: state.cartMeta.pos_mode,
     payment_method: method,

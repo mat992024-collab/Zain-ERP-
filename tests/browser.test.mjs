@@ -104,6 +104,11 @@ async function waitFor(expression, tries = 80) {
   }
   return false;
 }
+async function hardNav(hash) {
+  await nav(BASE + '/?r=' + Date.now() + hash);
+  await waitFor(`document.querySelectorAll('#nav [data-nav]').length > 0`);
+  await sleep(900);
+}
 
 const results = [];
 function check(name, ok, extra = '') { results.push([name, ok]); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  ' + extra}`); }
@@ -423,11 +428,11 @@ async function main() {
   check('label shows product name', /صنف اختبار المتصفح/.test(labelText), labelText.slice(0, 40).replace(/\n/g, ' '));
 
   phase = 'print-template';
-  await nav(BASE);
+  await nav(BASE + '#/admin');
   await waitFor(`document.querySelectorAll('#nav [data-nav]').length > 0`);
   await sleep(1200);
-  await evalJs(`location.hash = '#/admin'`);
-  await sleep(1800);
+  await waitFor(`!!document.getElementById('backupCard')`, 60);
+  await sleep(600);
   await evalJs(`(function(){const b=document.getElementById('settingsBtn');if(b)b.click();})()`);
   await waitFor(`!!document.getElementById('set_print_header_text')`);
   await sleep(400);
@@ -450,11 +455,11 @@ async function main() {
   await evalJs(`fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({print_header_text:'',print_footer_note:'',print_font_size:'normal'})})`, true);
 
   phase = 'export-download';
-  await nav(BASE);
+  await nav(BASE + '#/sales');
   await waitFor(`document.querySelectorAll('#nav [data-nav]').length > 0`);
   await sleep(1200);
-  await evalJs(`location.hash = '#/sales'`);
-  await sleep(2000);
+  await waitFor(`!!document.querySelector('#sExport')`, 60);
+  await sleep(600);
   const exportBtn = await evalJs(`!!document.querySelector('#sExport')`);
   check('sales export button present', exportBtn === true);
   const dlDir = path.join(os.tmpdir(), 'zain-dl-' + Date.now());
@@ -527,10 +532,9 @@ async function main() {
   check('custom reminder deleted from UI', rmAfter === 0, 'rows=' + rmAfter);
 
   phase = 'inventory-report';
-  await nav(BASE);
+  await nav(BASE + '#/reports');
   await waitFor(`document.querySelectorAll('#nav [data-nav]').length > 0`);
   await sleep(1200);
-  await evalJs(`location.hash = '#/reports'`);
   await waitFor(`!!document.querySelector('[data-rtab="inventory"]')`);
   await sleep(1200);
   await evalJs(`document.querySelector('[data-rtab="inventory"]').click()`);
@@ -562,10 +566,9 @@ async function main() {
   phase = 'tax-report';
   await evalJs(`fetch('/api/products/${productId}',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({tax_rate:10})}).then(r=>r.json())`, true);
   await evalJs(`fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({tax_mode:'auto'})}).then(r=>r.json())`, true);
-  await nav(BASE);
+  await hardNav('#/pos');
   await waitFor(`!!document.getElementById('main') && !document.getElementById('main').classList.contains('hidden')`);
   await sleep(1000);
-  await evalJs(`location.hash = '#/pos'`);
   await waitFor(`!!document.getElementById('posSearch')`);
   await sleep(1200);
   await evalJs(`(function(){const s=document.getElementById('posSearch');s.value='UITEST1';s.dispatchEvent(new Event('input'));})()`);
@@ -596,12 +599,11 @@ async function main() {
   check('tax report api returns totals', taxApi && typeof taxApi.o === 'number' && taxApi.rows >= 0, JSON.stringify(taxApi));
 
   phase = 'activity-log';
-  await nav(BASE);
+  await nav(BASE + '#/activity');
   await waitFor(`document.querySelectorAll('#nav [data-nav]').length > 0`);
   await sleep(1000);
   const actNav = await evalJs(`!!document.querySelector('#nav [data-nav="activity"]')`);
   check('activity nav link present', actNav === true);
-  await evalJs(`location.hash = '#/activity'`);
   await waitFor(`!!document.getElementById('acRows') && document.querySelectorAll('#acRows tr').length > 0`);
   await sleep(700);
   const actRows = await evalJs(`document.querySelectorAll('#acRows tr').length`);
@@ -651,6 +653,7 @@ async function main() {
   await sleep(1500);
   const gsRoute = await evalJs(`location.hash`);
   check('quick search navigates to inventory', gsRoute === '#/inventory', gsRoute);
+  await waitFor(`!!document.getElementById('pSearch')`, 40);
   const gsSearch = await evalJs(`(document.getElementById('pSearch')||{}).value||''`);
   check('quick search prefills view filter', /صنف اختبار/.test(gsSearch), gsSearch);
   await evalJs(`document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}))`);
@@ -667,6 +670,7 @@ async function main() {
   await sleep(700);
   await evalJs(`location.hash = '#/products'`);
   await sleep(1800);
+  await waitFor(`document.querySelectorAll('#pBody img').length > 0`, 40);
   const invImg = await evalJs(`document.querySelectorAll('#pBody img').length`);
   check('inventory list shows product image', invImg >= 1, 'imgs=' + invImg);
   await evalJs(`location.hash = '#/pos'`);
@@ -703,6 +707,42 @@ async function main() {
   await evalJs(`document.querySelector('[data-cancel]').click()`);
   await sleep(400);
   await evalJs(`fetch('/api/products/${productId}/image',{method:'DELETE',headers:{'Authorization':'Bearer ${token}'}})`, true);
+
+  phase = 'product-prices';
+  await evalJs(`fetch('/api/products/${productId}/prices',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({currency:'USD',sale_price:12.5,cost_price:8,wholesale_price:10})})`, true);
+  await evalJs(`(function(){[...document.querySelectorAll('.modal-backdrop')].forEach(b=>{const c=b.querySelector('[data-cancel]');if(c)c.click();});return true;})()`);
+  await evalJs(`location.hash = '#/dashboard'`);
+  await sleep(600);
+  await evalJs(`location.hash = '#/products'`);
+  await sleep(1800);
+  await waitFor(`!!document.querySelector('#pBody [data-edit="${productId}"]')`, 40);
+  await evalJs(`(function(){const b=document.querySelector('#pBody [data-edit="${productId}"]');if(b)b.click();})()`);
+  await sleep(1000);
+  const priceForm = await evalJs(`(function(){const el=document.querySelector('[data-pcur="USD"]');return el?el.value:'';})()`);
+  check('product form loads foreign price', Number(priceForm) === 12.5, 'value=' + priceForm);
+  await evalJs(`(function(){const el=document.querySelector('[data-pcur="USD"]');el.value='15.5';el.dispatchEvent(new Event('input'));})()`);
+  await evalJs(`document.getElementById('prodSave').click()`);
+  await sleep(1800);
+  const savedPrice = await evalJs(`fetch('/api/products/${productId}/prices',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>{const x=d.rows.find(r=>r.currency==='USD');return x?x.sale_price:0;})`, true);
+  check('foreign price saved from product form', Number(savedPrice) === 15.5, 'value=' + savedPrice);
+  await evalJs(`location.hash = '#/pos'`);
+  await sleep(1800);
+  await evalJs(`(function(){const s=document.getElementById('posSearch');s.value='UITEST1';s.dispatchEvent(new Event('input'));})()`);
+  await waitFor(`!!document.querySelector('#productGrid [data-id]')`, 40);
+  await sleep(400);
+  const chipText = await evalJs(`[...document.querySelectorAll('#productGrid .badge')].map(x=>x.textContent.trim()).join(' ')`);
+  check('pos grid shows foreign price chip', /USD/.test(chipText), chipText.slice(0, 60));
+  await evalJs(`document.querySelector('#productGrid [data-id]').click()`);
+  await sleep(500);
+  await evalJs(`document.getElementById('payBtn').click()`);
+  await waitFor(`!!document.getElementById('payCurrency')`, 40);
+  await evalJs(`(function(){const s=document.getElementById('payCurrency');s.value='USD';s.dispatchEvent(new Event('change'));})()`);
+  await sleep(600);
+  const posTotal = await evalJs(`document.getElementById('payTotal').textContent`);
+  check('payment uses product foreign price', /١٥[٫.]٥/.test(posTotal), 'total=' + posTotal);
+  await evalJs(`(function(){const b=document.querySelector('.modal-backdrop [data-cancel]');if(b)b.click();})()`);
+  await sleep(400);
+  await evalJs(`fetch('/api/products/${productId}/prices/USD',{method:'DELETE',headers:{'Authorization':'Bearer ${token}'}})`, true);
 
   phase = 'offline';
   const external = [...new Set(requests)].filter((u) => !u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:') && !u.startsWith('about:'));

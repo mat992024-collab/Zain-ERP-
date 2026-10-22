@@ -20,8 +20,11 @@ async function listView(c, { mode }) {
     lowOnly = false;
     state.pendingSearch = null;
   }
-  const categories = await api('GET', '/api/products/categories').then((r) => r.categories).catch(() => []);
-  const suppliers = await api('GET', '/api/suppliers?page_size=200').then((r) => r.rows).catch(() => []);
+  const [categories, suppliers, currencies] = await Promise.all([
+    api('GET', '/api/products/categories').then((r) => r.categories).catch(() => []),
+    api('GET', '/api/suppliers?page_size=200').then((r) => r.rows).catch(() => []),
+    api('GET', '/api/currencies').then((r) => r.rows).catch(() => []),
+  ]);
 
   c.innerHTML = `
     <div class="card">
@@ -68,7 +71,9 @@ async function listView(c, { mode }) {
           <td class="td">
             <div class="flex items-center gap-2">
               ${p.image ? `<img src="${esc(p.image)}" alt="${esc(p.name)}" class="w-9 h-9 rounded-lg object-cover border border-slate-200 shrink-0" />` : ''}
-              <div><div class="font-bold text-slate-800">${esc(p.name)}</div><div class="text-[11px] text-slate-400">${esc(p.author || p.part_number || '')}</div></div>
+              <div><div class="font-bold text-slate-800">${esc(p.name)}</div><div class="text-[11px] text-slate-400">${esc(p.author || p.part_number || '')}</div>
+                ${Object.keys(p.prices || {}).length ? `<div class="flex gap-1 mt-1 flex-wrap">${Object.keys(p.prices).map((code) => `<span class="badge badge-info">${esc(code)}</span>`).join('')}</div>` : ''}
+              </div>
             </div>
           </td>
           <td class="td font-mono text-xs">${esc(p.barcode || '-')}</td>
@@ -92,7 +97,7 @@ async function listView(c, { mode }) {
   };
 
   const bindRows = (rows) => {
-    c.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => productForm(rows.find((x) => x.id === +b.dataset.edit), { categories, suppliers, onSave: load })));
+    c.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => productForm(rows.find((x) => x.id === +b.dataset.edit), { categories, suppliers, currencies, onSave: load })));
     c.querySelectorAll('[data-stock]').forEach((b) => b.addEventListener('click', () => stockAdjust(rows.find((x) => x.id === +b.dataset.stock), load)));
     c.querySelectorAll('[data-labels]').forEach((b) => b.addEventListener('click', () => labelsForm([+b.dataset.labels])));
     c.querySelectorAll('[data-move]').forEach((b) => b.addEventListener('click', () => movements(+b.dataset.move)));
@@ -109,7 +114,7 @@ async function listView(c, { mode }) {
   c.querySelector('#pLow').addEventListener('change', (e) => { lowOnly = e.target.checked; page = 1; load(); });
   c.querySelector('#pPrev').addEventListener('click', () => { if (page > 1) { page--; load(); } });
   c.querySelector('#pNext').addEventListener('click', () => { page++; load(); });
-  c.querySelector('#pAdd').addEventListener('click', () => productForm(null, { categories, suppliers, onSave: load }));
+  c.querySelector('#pAdd').addEventListener('click', () => productForm(null, { categories, suppliers, currencies, onSave: load }));
   c.querySelector('#pBulk').addEventListener('click', () => bulkForm(categories, load));
   c.querySelector('#pExpiry').addEventListener('click', () => expiryReport());
   c.querySelector('#pLabel').addEventListener('click', () => labelsForm(null));
@@ -156,9 +161,21 @@ async function expiryReport() {
   });
 }
 
-function productForm(product, { categories, suppliers, onSave }) {
+function productForm(product, { categories, suppliers, currencies, onSave }) {
   const p = product || {};
   const industryFields = { supermarket: ['expiry_date'], bookstore: ['author'], spare_parts: ['part_number', 'brand'] }[state.settings.industry] || [];
+  const baseCode = (currencies || []).find((c) => c.is_base)?.code || '';
+  const foreignCurrencies = (currencies || []).filter((c) => !c.is_base);
+  const priceRows = foreignCurrencies.map((c) => {
+    const saved = (p.prices || {})[c.code] || {};
+    return `
+      <div class="grid grid-cols-4 gap-2 items-center border border-slate-100 rounded-xl p-2" data-price-row="${esc(c.code)}">
+        <div class="font-bold text-sm text-slate-700">${esc(c.code)} <span class="text-[11px] text-slate-400">${esc(c.name)}</span></div>
+        <input data-pcur="${esc(c.code)}" data-pk="sale_price" type="number" step="0.01" value="${saved.sale_price || 0}" class="field !py-1 !px-2 text-xs" placeholder="سعر البيع" />
+        <input data-pcur="${esc(c.code)}" data-pk="cost_price" type="number" step="0.01" value="${saved.cost_price || 0}" class="field !py-1 !px-2 text-xs" placeholder="سعر التكلفة" />
+        <input data-pcur="${esc(c.code)}" data-pk="wholesale_price" type="number" step="0.01" value="${saved.wholesale_price || 0}" class="field !py-1 !px-2 text-xs" placeholder="سعر الجملة" />
+      </div>`;
+  }).join('');
   modal({
     title: product ? `تعديل: ${p.name}` : 'صنف جديد',
     size: 'max-w-3xl',
@@ -197,6 +214,16 @@ function productForm(product, { categories, suppliers, onSave }) {
           </div>`)}
         </div>
         <div class="col-span-2">${field('ملاحظات', `<textarea name="description" class="field" rows="2">${esc(p.description || '')}</textarea>`)}</div>
+        <div class="col-span-2">
+          ${field('أسعار العملات الأخرى', `
+            <div class="space-y-2">
+              <div class="grid grid-cols-4 gap-2 px-2 text-[11px] font-bold text-slate-400">
+                <span>العملة</span><span>سعر البيع</span><span>سعر التكلفة</span><span>سعر الجملة</span>
+              </div>
+              ${priceRows || `<p class="text-xs text-slate-400 p-2">لا توجد عملات غير أساسية. أضف عملات من شاشة الإدارة لتحديد أسعار متعددة لكل صنف.</p>`}
+              ${priceRows ? `<p class="text-[11px] text-slate-400">السعر الأساسي لل currency ${esc(baseCode)} يبقى في حقول التكلفة/البيع/الجملة أعلاه.</p>` : ''}
+            </div>`)}
+        </div>
       </form>`,
     footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="prodSave" class="btn btn-primary"><i class="bi bi-check2"></i> حفظ</button>`,
     onMount(wrap, close) {
@@ -231,6 +258,12 @@ function productForm(product, { categories, suppliers, onSave }) {
         for (const k of ['cost_price', 'sale_price', 'wholesale_price', 'quantity', 'reorder_level']) data[k] = Number(data[k]) || 0;
         const imageValue = imgData.value;
         delete data.image;
+        const priceInputs = new Map();
+        wrap.querySelectorAll('[data-pcur]').forEach((el) => {
+          const code = el.dataset.pcur;
+          if (!priceInputs.has(code)) priceInputs.set(code, {});
+          priceInputs.get(code)[el.dataset.pk] = Number(el.value) || 0;
+        });
         try {
           let savedId = product ? product.id : null;
           if (product) await api('PUT', `/api/products/${product.id}`, data);
@@ -242,6 +275,12 @@ function productForm(product, { categories, suppliers, onSave }) {
             await api('POST', `/api/products/${savedId}/image`, { data_url: imageValue });
           } else if (product && product.image && !imageValue) {
             await api('DELETE', `/api/products/${savedId}/image`);
+          }
+          for (const [code, vals] of priceInputs) {
+            const has = vals.sale_price || vals.cost_price || vals.wholesale_price;
+            const had = product && product.prices && product.prices[code];
+            if (has) await api('PUT', `/api/products/${savedId}/prices`, { currency: code, ...vals });
+            else if (had) await api('DELETE', `/api/products/${savedId}/prices/${code}`);
           }
           toast('تم الحفظ', 'success');
           close();

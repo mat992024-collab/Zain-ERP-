@@ -392,6 +392,36 @@ const { readZip } = require('../src/server/core/zip');
   r = await call('DELETE', '/api/currencies/IQD', null, token);
   ok('base currency cannot be deleted (400)', r.status === 400, String(r.status));
 
+  r = await call('POST', '/api/products', { name: 'صنف بأسعار متعددة', category: 'عام', sale_price: 131000, cost_price: 100000, quantity: 5, unit: 'قطعة' }, token);
+  const multiPriceId = r.data.product.id;
+  ok('multi price product created', r.status === 201, String(r.status));
+  r = await call('PUT', `/api/products/${multiPriceId}/prices`, { currency: 'USD', sale_price: 25, cost_price: 15, wholesale_price: 22 }, token);
+  ok('set product price in foreign currency', r.status === 200 && r.data.rows.some((x) => x.currency === 'USD' && x.sale_price === 25), JSON.stringify(r.data.rows));
+  r = await call('GET', `/api/products/${multiPriceId}/prices`, null, token);
+  ok('read product prices', r.status === 200 && r.data.rows.length === 1 && r.data.rows[0].currency === 'USD', JSON.stringify(r.data.rows));
+  r = await call('GET', `/api/products/${multiPriceId}`, null, token);
+  ok('product exposes prices map', r.status === 200 && r.data.product.prices && r.data.product.prices.USD.sale_price === 25, JSON.stringify(r.data.product && r.data.product.prices));
+  r = await call('GET', '/api/products?page_size=5', null, token);
+  const listedMulti = r.data.rows.find((x) => x.id === multiPriceId);
+  ok('product list includes prices', !!listedMulti && listedMulti.prices && listedMulti.prices.USD.sale_price === 25, JSON.stringify(listedMulti && listedMulti.prices));
+  r = await call('PUT', `/api/products/${multiPriceId}/prices`, { currency: 'XXX', sale_price: 5 }, token);
+  ok('unknown currency rejected for product price (400)', r.status === 400, String(r.status));
+  r = await call('PUT', `/api/products/${multiPriceId}/prices`, { currency: 'USD', sale_price: -5 }, token);
+  ok('negative product price rejected (400)', r.status === 400, String(r.status));
+  r = await call('PUT', `/api/products/${multiPriceId}/prices`, { currency: 'USD', sale_price: 1 }, cashierToken);
+  ok('cashier cannot set product prices (403)', r.status === 403, String(r.status));
+  r = await call('POST', '/api/sales', {
+    items: [{ product_id: multiPriceId, qty: 2, unit_price: 25 * 1310 }],
+    payment_method: 'cash',
+    currency: 'USD',
+    paid_original: 50,
+  }, token);
+  ok('sale uses product foreign price', r.status === 201 && Math.abs(Number(r.data.invoice.total_original) - 50) < 0.01 && Math.abs(Number(r.data.invoice.total) - 65500) < 0.01, JSON.stringify(r.data.invoice && { t: r.data.invoice.total, o: r.data.invoice.total_original }));
+  r = await call('DELETE', `/api/products/${multiPriceId}/prices/USD`, null, token);
+  ok('delete product price', r.status === 200, String(r.status));
+  r = await call('GET', `/api/products/${multiPriceId}/prices`, null, token);
+  ok('product price removed', r.status === 200 && r.data.rows.length === 0, JSON.stringify(r.data.rows));
+
   r = await call('GET', '/api/backup', null, token);
   ok('backup list', r.status === 200 && Array.isArray(r.data.backups), r.status);
   ok('backup auto state', r.status === 200 && r.data.auto && r.data.auto.enabled === false && typeof r.data.auto.next === 'string', JSON.stringify(r.data.auto));

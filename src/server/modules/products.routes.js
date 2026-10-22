@@ -15,6 +15,7 @@ function normalizeProduct(data) {
   const out = pick(data, FIELDS);
   delete out.image;
   if (out.units && typeof out.units !== 'string') out.units = JSON.stringify(out.units);
+  if ('supplier_id' in out && (out.supplier_id === '' || out.supplier_id === null)) out.supplier_id = null;
   for (const k of ['track_expiry', 'is_active']) {
     if (k in out) out[k] = toBool(out[k]) ? 1 : 0;
   }
@@ -30,6 +31,29 @@ function recordMovement(productId, direction, qty, balanceAfter, reason, refTabl
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [productId, direction, qty, balanceAfter, reason || null, refTable || null, refId || null, userId || null]
   );
+}
+
+function attachPrices(rows) {
+  const list = Array.isArray(rows) ? rows : [rows];
+  if (!list.length) return list;
+  const ids = list.map((r) => r.id).filter((v) => v !== undefined && v !== null);
+  if (!ids.length) return list;
+  const placeholders = ids.map(() => '?').join(',');
+  const priceRows = db.all(
+    `SELECT product_id, currency, sale_price, cost_price, wholesale_price FROM product_prices WHERE product_id IN (${placeholders})`,
+    ids
+  );
+  const map = new Map();
+  for (const row of priceRows) {
+    if (!map.has(row.product_id)) map.set(row.product_id, {});
+    map.get(row.product_id)[row.currency] = {
+      sale_price: Number(row.sale_price) || 0,
+      cost_price: Number(row.cost_price) || 0,
+      wholesale_price: Number(row.wholesale_price) || 0,
+    };
+  }
+  for (const row of list) row.prices = map.get(row.id) || {};
+  return list;
 }
 
 module.exports = {
@@ -57,6 +81,7 @@ module.exports = {
         where, params, order, limit, offset,
         search, searchCols: ['name', 'barcode', 'sku', 'part_number', 'author', 'brand'],
       });
+      attachPrices(result.rows);
       sendJson(ctx.res, 200, result);
     });
 
@@ -70,6 +95,7 @@ module.exports = {
     router.get('/api/products/barcode/:code', (ctx) => {
       const product = db.get('SELECT * FROM products WHERE barcode = ? AND is_active = 1', [ctx.params.code]);
       if (!product) throw new HttpError(404, 'المنتج غير موجود');
+      attachPrices(product);
       sendJson(ctx.res, 200, { product: parseJsonFields(product, ['units']) });
     });
 
@@ -97,7 +123,7 @@ module.exports = {
           [limit]
         );
       }
-      sendJson(ctx.res, 200, { rows });
+      sendJson(ctx.res, 200, { rows: attachPrices(rows) });
     });
 
     router.get('/api/products/low-stock', (ctx) => {
@@ -125,7 +151,64 @@ module.exports = {
     router.get('/api/products/:id', (ctx) => {
       const product = db.get('SELECT * FROM products WHERE id = ?', [ctx.params.id]);
       if (!product) throw new HttpError(404, 'المنتج غير موجود');
+      attachPrices(product);
       sendJson(ctx.res, 200, { product: parseJsonFields(product, ['units']) });
+    });
+
+    router.get('/api/products/:id/prices', (ctx) => {
+      const product = db.get('SELECT id, name FROM products WHERE id = ?', [ctx.params.id]);
+      if (!product) throw new HttpError(404, 'المنتج غير موجود');
+      const rows = db.all(
+        'SELECT currency, sale_price, cost_price, wholesale_price, updated_at FROM product_prices WHERE product_id = ? ORDER BY currency',
+        [ctx.params.id]
+      );
+      sendJson(ctx.res, 200, { product_id: product.id, rows });
+    });
+
+    router.put('/api/products/:id/prices', (ctx) => {
+      if (!ctx.can('inventory.write') && !ctx.can('products.write')) {
+        throw new HttpError(403, 'لا تملك صلاحية تعديل المنتجات');
+      }
+      const product = db.get('SELECT * FROM products WHERE id = ?', [ctx.params.id]);
+      if (!product) throw new HttpError(404, 'المنتج غير موجود');
+      const body = ctx.body || {};
+      const code = String(body.currency || '').trim().toUpperCase();
+      if (!code) throw new HttpError(400, 'رمز العملة مطلوب');
+      const cur = db.get('SELECT * FROM currencies WHERE code = ?', [code]);
+      if (!cur) throw new HttpError(400, 'العملة غير موجودة');
+      if (!cur.is_active && !cur.is_base) throw new HttpError(400, 'العملة غير مفعلة');
+      const sale = Number(body.sale_price) || 0;
+      const cost = Number(body.cost_price) || 0;
+      const wholesale = Number(body.wholesale_price) || 0;
+      if (sale < 0 || cost < 0 || wholesale < 0) throw new HttpError(400, 'الأسعار لا يمكن أن تكون سالبة');
+      db.run(
+        `INSERT INTO product_prices (product_id, currency, sale_price, cost_price, wholesale_price, updated_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now','localtime'))
+         ON CONFLICT(product_id, currency) DO UPDATE SET
+           sale_price = excluded.sale_price,
+           cost_price = excluded.cost_price,
+           wholesale_price = excluded.wholesale_price,
+           updated_at = excluded.updated_at`,
+        [product.id, code, sale, cost, wholesale]
+      );
+      db.logActivity(ctx.user.id, 'update', 'products', product.id, { currency: code, sale_price: sale });
+      const rows = db.all(
+        'SELECT currency, sale_price, cost_price, wholesale_price FROM product_prices WHERE product_id = ? ORDER BY currency',
+        [product.id]
+      );
+      sendJson(ctx.res, 200, { ok: true, rows });
+    });
+
+    router.delete('/api/products/:id/prices/:currency', (ctx) => {
+      if (!ctx.can('inventory.write') && !ctx.can('products.write')) {
+        throw new HttpError(403, 'لا تملك صلاحية تعديل المنتجات');
+      }
+      const product = db.get('SELECT * FROM products WHERE id = ?', [ctx.params.id]);
+      if (!product) throw new HttpError(404, 'المنتج غير موجود');
+      const code = String(ctx.params.currency || '').trim().toUpperCase();
+      db.run('DELETE FROM product_prices WHERE product_id = ? AND currency = ?', [product.id, code]);
+      db.logActivity(ctx.user.id, 'update', 'products', product.id, { currency: code, price_removed: true });
+      sendJson(ctx.res, 200, { ok: true });
     });
 
     router.post('/api/products', (ctx) => {
@@ -152,7 +235,9 @@ module.exports = {
         }
       });
       db.logActivity(ctx.user.id, 'create', 'products', id, { name: data.name });
-      sendJson(ctx.res, 201, { product: parseJsonFields(db.get('SELECT * FROM products WHERE id = ?', [id]), ['units']) });
+      const created = db.get('SELECT * FROM products WHERE id = ?', [id]);
+      attachPrices(created);
+      sendJson(ctx.res, 201, { product: parseJsonFields(created, ['units']) });
     });
 
     router.put('/api/products/:id', (ctx) => {
@@ -176,7 +261,9 @@ module.exports = {
         }
       });
       db.logActivity(ctx.user.id, 'update', 'products', existing.id);
-      sendJson(ctx.res, 200, { product: parseJsonFields(db.get('SELECT * FROM products WHERE id = ?', [existing.id]), ['units']) });
+      const updated = db.get('SELECT * FROM products WHERE id = ?', [existing.id]);
+      attachPrices(updated);
+      sendJson(ctx.res, 200, { product: parseJsonFields(updated, ['units']) });
     });
 
     router.post('/api/products/:id/image', (ctx) => {

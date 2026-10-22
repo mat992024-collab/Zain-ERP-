@@ -50,6 +50,19 @@ CREATE TABLE IF NOT EXISTS products (
   FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS product_prices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  sale_price REAL NOT NULL DEFAULT 0,
+  cost_price REAL NOT NULL DEFAULT 0,
+  wholesale_price REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  UNIQUE(product_id, currency),
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS customers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
