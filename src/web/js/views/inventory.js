@@ -1,4 +1,4 @@
-import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, debounce, formToObject, downloadFile, pickImageFile } from '../core.js';
+import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, debounce, formToObject, downloadFile, pickImageFile, barcodeSvg } from '../core.js';
 
 const BULK_FIELDS = ['name', 'barcode', 'part_number', 'author', 'category', 'brand', 'unit', 'cost_price', 'sale_price', 'wholesale_price', 'quantity', 'reorder_level', 'tax_rate', 'expiry_date', 'supplier_id', 'track_expiry', 'is_active', 'description'];
 
@@ -182,7 +182,11 @@ function productForm(product, { categories, suppliers, currencies, onSave }) {
     body: `
       <form id="prodForm" class="grid grid-cols-2 gap-4">
         ${field('اسم الصنف *', `<input name="name" value="${esc(p.name || '')}" class="field" required />`)}
-        ${field('الباركود', `<input name="barcode" value="${esc(p.barcode || '')}" class="field font-mono" placeholder="يتم توليده تلقائياً" />`)}
+        ${field('الباركود', `<input name="barcode" id="pfBarcode" value="${esc(p.barcode || '')}" class="field font-mono" placeholder="يتم توليده تلقائياً" />`)}
+        <div class="col-span-2 card p-3 flex items-center gap-3">
+          <div class="flex-1 min-w-0 overflow-auto" id="pfBarcodeBox">${p.barcode ? barcodeSvg(p.barcode, { width: 280 }) : `<div class="text-xs text-slate-400">أدخل باركود لعرض المعاينة مباشرةً</div>`}</div>
+          <button type="button" id="pfBarcodePrint" class="btn btn-ghost btn-sm"><i class="bi bi-printer"></i> طباعة باركود</button>
+        </div>
         ${industryFields.includes('part_number') ? field('رقم القطعة', `<input name="part_number" value="${esc(p.part_number || '')}" class="field" />`) : ''}
         ${industryFields.includes('author') ? field('المؤلف', `<input name="author" value="${esc(p.author || '')}" class="field" />`) : ''}
         ${industryFields.includes('brand') ? field('الماركة', `<input name="brand" value="${esc(p.brand || '')}" class="field" />`) : ''}
@@ -246,6 +250,28 @@ function productForm(product, { categories, suppliers, currencies, onSave }) {
           toast(err.message, 'error');
         }
       });
+      const barInput = wrap.querySelector('#pfBarcode');
+      const barBox = wrap.querySelector('#pfBarcodeBox');
+      const barPrint = wrap.querySelector('#pfBarcodePrint');
+      if (barInput && barBox) {
+        const updateBar = () => {
+          const v = (barInput.value || '').trim();
+          if (!v) { barBox.innerHTML = `<div class="text-xs text-slate-400">أدخل باركود لعرض المعاينة مباشرةً</div>`; return; }
+          barBox.innerHTML = barcodeSvg(v, { width: 280 });
+        };
+        barInput.addEventListener('input', updateBar);
+        updateBar();
+      }
+      if (barPrint && barInput) {
+        barPrint.addEventListener('click', () => {
+          const v = (barInput.value || '').trim();
+          if (!v) { toast('أدخل باركود أولاً', 'error'); return; }
+          const svg = barcodeSvg(v, { width: 400, height: 60 });
+          const html = `<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>باركود</title><style>body{font-family:Cairo,Arial;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#fff}svg{max-width:100%}</style></head><body>${svg}</body></html>`;
+          const w = window.open('', '_blank');
+          if (w) { w.document.write(html); w.document.close(); w.focus(); setTimeout(() => { try { w.print(); } catch(e){} }, 300); }
+        });
+      }
       wrap.querySelector('#pfImageClear').addEventListener('click', () => {
         imgData.value = '';
         wrap.querySelector('#pfImage').value = '';
