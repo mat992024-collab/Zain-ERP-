@@ -8,10 +8,12 @@ function shiftSummary(shift) {
      WHERE shift_id = ? AND type='sale'`, [shift.id]
   );
   const cash = db.get(
-    `SELECT COALESCE(SUM(amount),0) AS total FROM treasury WHERE shift_id = ? AND direction='in'`, [shift.id]
+    `SELECT COALESCE(SUM(amount),0) AS total FROM treasury
+     WHERE shift_id = ? AND direction='in' AND source NOT IN ('sale_card','sale_wallet')`, [shift.id]
   );
   const refunds = db.get(
-    `SELECT COALESCE(SUM(total),0) AS total FROM invoices WHERE shift_id = ? AND type='return_sale'`, [shift.id]
+    `SELECT COALESCE(SUM(amount),0) AS total FROM treasury
+     WHERE shift_id = ? AND direction='out' AND source = 'return_sale'`, [shift.id]
   );
   const expenses = db.get(
     `SELECT COALESCE(SUM(amount),0) AS total FROM expenses WHERE shift_id = ?`, [shift.id]

@@ -4,6 +4,7 @@ const path = require('node:path');
 db.init();
 db.conn().exec(`
   DELETE FROM invoice_items;
+  DELETE FROM invoice_payments;
   DELETE FROM invoices;
   DELETE FROM stock_movements;
   DELETE FROM expenses;

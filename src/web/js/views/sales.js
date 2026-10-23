@@ -1,6 +1,7 @@
 import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, formToObject, downloadFile } from '../core.js';
 
 const TYPE_LABELS = { sale: 'بيع', return_sale: 'مرتجع بيع', purchase: 'شراء', return_purchase: 'مرتجع شراء' };
+const METHOD_LABELS = { cash: 'نقدي', card: 'بطاقة', wallet: 'محفظة', credit: 'آجل', mixed: 'مختلط', bank: 'بنكي' };
 
 export async function renderSales(c) {
   let page = 1;
@@ -50,7 +51,7 @@ export async function renderSales(c) {
         <td class="td"><span class="badge ${r.type === 'sale' ? 'badge-ok' : r.type === 'purchase' ? 'badge-info' : 'badge-warn'}">${TYPE_LABELS[r.type] || r.type}</span></td>
         <td class="td">${esc(r.customer_name || r.supplier_name || 'نقدي')}</td>
         <td class="td">${r.items_count}</td>
-        <td class="td text-xs">${r.payment_method}</td>
+        <td class="td text-xs">${METHOD_LABELS[r.payment_method] || r.payment_method}</td>
         <td class="td font-bold">${money(r.total)}</td>
         <td class="td font-bold ${Number(r.profit) > 0 ? 'text-emerald-600' : Number(r.profit) < 0 ? 'text-rose-600' : 'text-slate-400'}">${r.type === 'sale' || r.type === 'return_sale' ? money(r.profit) : '—'}</td>
         <td class="td ${Number(r.due) > 0 ? 'text-rose-600 font-bold' : ''}">${money(r.due)}</td>
@@ -103,7 +104,7 @@ export async function renderSales(c) {
           <div class="card p-3"><div class="text-xs text-slate-400">النوع</div><div class="font-bold">${TYPE_LABELS[inv.type] || inv.type}</div></div>
           <div class="card p-3"><div class="text-xs text-slate-400">التاريخ</div><div class="font-bold text-sm">${esc(inv.created_at)}</div></div>
           <div class="card p-3"><div class="text-xs text-slate-400">العميل</div><div class="font-bold">${esc(inv.customer_name || inv.supplier_name || 'نقدي')}</div></div>
-          <div class="card p-3"><div class="text-xs text-slate-400">الدفع</div><div class="font-bold">${esc(inv.payment_method)}</div></div>
+          <div class="card p-3"><div class="text-xs text-slate-400">الدفع</div><div class="font-bold">${esc(METHOD_LABELS[inv.payment_method] || inv.payment_method)}</div></div>
         </div>
         <table class="w-full"><thead><tr><th class="th">الصنف</th><th class="th">الكمية</th><th class="th">السعر</th><th class="th">الخصم</th><th class="th">الإجمالي</th></tr></thead>
         <tbody>${data.items.map((i) => `<tr class="tr"><td class="td">${esc(i.name)}</td><td class="td">${num(i.qty)} ${esc(i.unit || '')}</td><td class="td">${money(i.unit_price, '')}</td><td class="td">${money(i.discount, '')}</td><td class="td font-bold">${money(i.total)}</td></tr>`).join('')}</tbody></table>
@@ -112,7 +113,9 @@ export async function renderSales(c) {
             <div class="flex justify-between"><span class="text-slate-500">الإجمالي الفرعي</span><span>${money(inv.subtotal)}</span></div>
             <div class="flex justify-between"><span class="text-slate-500">الخصم</span><span>${money(inv.discount)}</span></div>
             <div class="flex justify-between font-black text-lg text-zain-700 border-t border-dashed pt-2"><span>المجموع</span><span>${money(inv.total)}</span></div>
-            <div class="flex justify-between"><span class="text-slate-500">مدفوع</span><span>${money(inv.paid)}</span></div>
+            ${data.payments && data.payments.length
+              ? data.payments.map((p) => `<div class="flex justify-between"><span class="text-slate-500">مدفوع ${esc(METHOD_LABELS[p.method] || p.method)}</span><span>${money(p.amount)}</span></div>`).join('')
+              : `<div class="flex justify-between"><span class="text-slate-500">مدفوع</span><span>${money(inv.paid)}</span></div>`}
             <div class="flex justify-between text-rose-600 font-bold"><span>متبقي</span><span>${money(inv.due)}</span></div>
             ${inv.type === 'sale' || inv.type === 'return_sale' ? `
               <div class="flex justify-between border-t border-dashed pt-2"><span class="text-slate-500">تكلفة البضاعة</span><span>${money(inv.cost_total)}</span></div>
@@ -172,13 +175,46 @@ export async function renderSales(c) {
 
   async function salesReturn(id, reload) {
     const data = await api('GET', `/api/sales/${id}`);
-    if (data.invoice.type !== 'sale') { toast('يمكن إرجاع فواتير البيع فقط', 'error'); return; }
-    if (!(await confirmBox('إرجاع كامل الفاتورة وإعادة الأصناف للمخزون؟'))) return;
-    try {
-      await api('POST', `/api/sales/${id}/return`, {});
-      toast('تم إنشاء مرتجع البيع', 'success');
-      reload();
-    } catch (e) { toast(e.message, 'error'); }
+    const inv = data.invoice;
+    if (inv.type !== 'sale') { toast('يمكن إرجاع فواتير البيع فقط', 'error'); return; }
+    if (!data.items.length) { toast('لا توجد أصناف في الفاتورة', 'error'); return; }
+    modal({
+      title: `مرتجع بيع — ${inv.invoice_no}`,
+      size: 'max-w-2xl',
+      body: `
+        <div class="text-xs text-slate-500 mb-2">حدّد الكميات المرتجعة، وعلّم «تالف» للأصناف التي لن تعود إلى المخزون.</div>
+        <div class="overflow-auto max-h-[50vh]"><table class="w-full">
+          <thead><tr><th class="th">الصنف</th><th class="th">المباع</th><th class="th">المرتجع</th><th class="th">تالف</th></tr></thead>
+          <tbody>${data.items.map((i) => `<tr class="tr" data-row="${i.id}">
+            <td class="td">${esc(i.name)}</td>
+            <td class="td">${num(i.qty)} ${esc(i.unit || '')}</td>
+            <td class="td"><input data-qty type="number" min="0" max="${i.qty}" step="0.001" value="${i.qty}" class="field !w-24 !py-1" /></td>
+            <td class="td"><input data-dmg type="checkbox" class="w-4 h-4 accent-amber-600" /></td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+        <label class="flex items-center gap-2 mt-3 text-sm"><input id="retAllDamaged" type="checkbox" class="w-4 h-4 accent-amber-600" /> تعليم الكل كتالف (لا يعود للمخزون)</label>`,
+      footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="retOk" class="btn btn-warning"><i class="bi bi-arrow-return-right"></i> تسجيل المرتجع</button>`,
+      onMount(wrap, close) {
+        wrap.querySelector('#retAllDamaged').addEventListener('change', (e) => {
+          wrap.querySelectorAll('[data-dmg]').forEach((c) => { c.checked = e.target.checked; });
+        });
+        wrap.querySelector('[data-cancel]').addEventListener('click', close);
+        wrap.querySelector('#retOk').addEventListener('click', async () => {
+          const items = [];
+          for (const row of wrap.querySelectorAll('[data-row]')) {
+            const qty = Number(row.querySelector('[data-qty]').value) || 0;
+            if (qty > 0) items.push({ item_id: Number(row.dataset.row), qty, damaged: row.querySelector('[data-dmg]').checked });
+          }
+          if (!items.length) { toast('أدخل كمية مرتجعة واحدة على الأقل', 'error'); return; }
+          try {
+            await api('POST', `/api/sales/${id}/return`, { items });
+            toast('تم إنشاء مرتجع البيع', 'success');
+            close();
+            reload();
+          } catch (e) { toast(e.message, 'error'); }
+        });
+      },
+    });
   }
 
   async function purchaseReturn(id, reload) {

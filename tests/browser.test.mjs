@@ -349,7 +349,55 @@ async function main() {
   await evalJs(`(function(){const b=document.querySelector('.modal-backdrop [data-yes]');if(b)b.click();})()`);
   await sleep(300);
 
-  phase = 'auto-backup';
+  phase = 'pos-split';
+  await evalJs(`location.hash = '#/pos'`);
+  await sleep(1600);
+  await waitFor(`!!document.querySelector('#productGrid [data-id]')`, 40);
+  await evalJs(`document.querySelector('#productGrid [data-id]').click()`);
+  await sleep(400);
+  await evalJs(`document.getElementById('payBtn').click()`);
+  await waitFor(`!!document.querySelector('.pm-btn[data-pm="mixed"]')`, 40);
+  const walletBtn = await evalJs(`!!document.querySelector('.pm-btn[data-pm="wallet"]')`);
+  check('payment modal offers wallet and split', walletBtn === true);
+  await evalJs(`document.querySelector('.pm-btn[data-pm="mixed"]').click()`);
+  await sleep(300);
+  const mixedVisible = await evalJs(`(function(){const m=document.getElementById('mixedPay');const s=document.getElementById('singlePay');return !!m && !m.classList.contains('hidden') && s.classList.contains('hidden');})()`);
+  check('split panel replaces single amount', mixedVisible === true);
+  await evalJs(`(function(){const c=document.getElementById('payCard');c.value=1000;c.dispatchEvent(new Event('input'));document.getElementById('payFill').click();})()`);
+  await sleep(300);
+  const remainText = await evalJs(`document.getElementById('mixRemain').textContent`);
+  check('split remaining indicator complete', /مكتمل/.test(remainText), remainText);
+  await evalJs(`document.getElementById('confirmPay').click()`);
+  await sleep(2600);
+  const lastSplit = await evalJs(`fetch('/api/sales?type=sale&page_size=1',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows[0])`, true);
+  const splitDetail = await evalJs(`fetch('/api/sales/${lastSplit.id}',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.payments.map(p=>p.method).sort().join(','))`, true);
+  check('split sale saved from POS', lastSplit.payment_method === 'mixed', 'method=' + lastSplit.payment_method);
+  check('split sale stores two payment rows', splitDetail === 'card,cash', 'rows=' + splitDetail);
+
+  phase = 'sales-payments';
+  await evalJs(`location.hash = '#/sales'`);
+  await sleep(1600);
+  await waitFor(`!!document.querySelector('[data-view]')`, 40);
+  await evalJs(`document.querySelector('[data-view]').click()`);
+  await sleep(700);
+  const viewText = await evalJs(`(function(){const p=document.querySelector('.modal-panel');return p?p.innerText:'';})()`);
+  check('invoice modal shows payment breakdown', /مدفوع نقدي/.test(viewText) && /مدفوع بطاقة/.test(viewText), viewText.replace(/\n/g, ' ').slice(0, 90));
+  await evalJs(`(function(){const b=document.querySelector('.modal-panel [data-close]');if(b)b.click();})()`);
+  await sleep(400);
+
+  phase = 'damaged-return-ui';
+  await evalJs(`document.querySelector('[data-ret]').click()`);
+  await waitFor(`!!document.getElementById('retAllDamaged')`, 40);
+  const retRows = await evalJs(`document.querySelectorAll('[data-row]').length`);
+  check('return modal lists invoice items', retRows > 0, 'rows=' + retRows);
+  await evalJs(`(function(){const c=document.getElementById('retAllDamaged');c.checked=true;c.dispatchEvent(new Event('change'));})()`);
+  const dmgChecked = await evalJs(`document.querySelectorAll('[data-dmg]:checked').length === document.querySelectorAll('[data-dmg]').length`);
+  check('mark all damaged toggles every line', dmgChecked === true);
+  await evalJs(`document.getElementById('retOk').click()`);
+  await sleep(1800);
+  const lastReturn = await evalJs(`fetch('/api/sales?type=return_sale&page_size=1',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows[0])`, true);
+  check('damaged return saved from UI', !!lastReturn && String(lastReturn.notes).includes('تالف'), JSON.stringify(lastReturn && lastReturn.notes));
+
   await evalJs(`location.hash = '#/admin'`);
   await waitFor(`!!document.getElementById('backupCard')`);
   await sleep(600);
@@ -751,6 +799,7 @@ async function main() {
   const repBtns = await evalJs(`document.querySelectorAll('[data-rep]').length`);
   check('sales rows offer repeat button', repBtns > 0, 'count=' + repBtns);
   const salesBeforeRepeat = await evalJs(`fetch('/api/sales?page_size=500',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.total)`, true);
+  await evalJs(`(function(){window.__repToasts=[];const root=document.getElementById('toastRoot');if(root){new MutationObserver(ms=>{for(const m of ms)for(const n of m.addedNodes){if(n.innerText)window.__repToasts.push(n.innerText);}}).observe(root,{childList:true});}})()`);
   await evalJs(`document.querySelector('[data-rep]').click()`);
   for (let i = 0; i < 2; i++) {
     const hasConfirm = await waitFor(`(function(){const b=[...document.querySelectorAll('.modal-backdrop')].pop();return !!(b&&b.querySelector('[data-yes]'));})()`, 8);
@@ -761,7 +810,7 @@ async function main() {
   await sleep(700);
   const salesAfterRepeat = await evalJs(`fetch('/api/sales?page_size=500',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.total)`, true);
   check('repeat invoice creates invoice', Number(salesAfterRepeat) === Number(salesBeforeRepeat) + 1, `${salesBeforeRepeat} -> ${salesAfterRepeat}`);
-  const repToast = await evalJs(`/تم إنشاء الفاتورة/.test((document.getElementById('toastRoot') || {}).innerText || '')`);
+  const repToast = await evalJs(`(window.__repToasts || []).some(t => /تم إنشاء الفاتورة/.test(t))`);
   check('repeat invoice shows toast', repToast === true);
   const repNotes = await evalJs(`fetch('/api/sales?page_size=5',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows[0].notes || '')`, true);
   check('repeat invoice tagged in list', /تكرار/.test(repNotes), repNotes);

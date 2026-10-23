@@ -20,6 +20,18 @@ function invoiceCurrency(invoice, settings) {
   };
 }
 
+const METHOD_LABELS = { cash: 'نقدي', card: 'بطاقة', wallet: 'محفظة', credit: 'آجل', mixed: 'مختلط' };
+
+function paymentRows(invoice, payments, invCur, cur) {
+  if (payments && payments.length) {
+    return payments
+      .map((p) => `<tr><td>${METHOD_LABELS[p.method] || esc(p.method)}</td><td class="col-price">${money(invCur.convert(p.amount), cur)}</td></tr>`)
+      .join('');
+  }
+  if (!Number(invoice.paid)) return '';
+  return `<tr><td>مدفوع (${METHOD_LABELS[invoice.payment_method] || esc(invoice.payment_method)})</td><td class="col-price">${money(invCur.convert(invoice.paid), cur)}</td></tr>`;
+}
+
 function esc(str = '') {
   return String(str)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -101,8 +113,9 @@ function fetchInvoice(id) {
   );
   if (!invoice) return null;
   const items = db.all('SELECT ii.*, p.image AS image FROM invoice_items ii LEFT JOIN products p ON p.id = ii.product_id WHERE ii.invoice_id = ?', [id]);
+  const payments = db.all('SELECT method, amount FROM invoice_payments WHERE invoice_id = ? ORDER BY id', [id]);
   const settings = db.getSettings();
-  return { invoice, items, settings };
+  return { invoice, items, payments, settings };
 }
 
 module.exports = {
@@ -139,7 +152,7 @@ module.exports = {
           ${Number(invoice.discount) ? `<tr><td>الخصم</td><td class="col-price">-${money(invCur.convert(invoice.discount), cur)}</td></tr>` : ''}
           ${Number(invoice.tax) ? `<tr><td>الضريبة${Number(invoice.tax_inclusive) ? ' (ضمن السعر)' : ''}</td><td class="col-price">${money(invCur.convert(invoice.tax), cur)}</td></tr>` : ''}
           <tr class="total-row"><td>المجموع</td><td class="col-price">${money(invCur.convert(invoice.total), cur)}</td></tr>
-          <tr><td>مدفوع (${esc(invoice.payment_method)})</td><td class="col-price">${money(invCur.convert(invoice.paid), cur)}</td></tr>
+          ${paymentRows(invoice, data.payments, invCur, cur)}
           ${Number(invoice.due) ? `<tr><td>متبقي</td><td class="col-price">${money(invCur.convert(invoice.due), cur)}</td></tr>` : ''}
         </table>
         ${invCur.foreign ? `<div class="center muted">المبلغ بالعملة الأساسية: ${money(invoice.total, settings.currency_symbol || 'د.ع')} — سعر الصرف: 1 ${esc(invCur.foreign.code)} = ${invCur.rate} ${esc(settings.base_currency || 'IQD')}</div>` : ''}
@@ -199,7 +212,9 @@ module.exports = {
           <div><span>الخصم</span><span>${money(invCur.convert(invoice.discount), cur)}</span></div>
           <div><span>الضريبة${Number(invoice.tax_inclusive) ? ' (ضمن السعر)' : ''}</span><span>${money(invCur.convert(invoice.tax), cur)}</span></div>
           <div class="grand"><span>المجموع</span><span>${money(invCur.convert(invoice.total), cur)}</span></div>
-          <div><span>مدفوع</span><span>${money(invCur.convert(invoice.paid), cur)}</span></div>
+          ${data.payments && data.payments.length
+            ? data.payments.map((p) => `<div><span>مدفوع ${METHOD_LABELS[p.method] || esc(p.method)}</span><span>${money(invCur.convert(p.amount), cur)}</span></div>`).join('')
+            : `<div><span>مدفوع</span><span>${money(invCur.convert(invoice.paid), cur)}</span></div>`}
           <div><span>المتبقي</span><span>${money(invCur.convert(invoice.due), cur)}</span></div>
           ${invCur.foreign ? `<div><span>المبلغ بالعملة الأساسية</span><span>${money(invoice.total, settings.currency_symbol || 'د.ع')}</span></div>` : ''}
         </div>
@@ -461,6 +476,7 @@ module.exports = {
           <tbody>
             <tr><td>مبيعات نقدية</td><td style="text-align:left">${money(data.sales.cash, '')}</td><td style="text-align:left">${data.sales.count}</td></tr>
             <tr><td>مبيعات بطاقة</td><td style="text-align:left">${money(data.sales.card, '')}</td><td style="text-align:left"></td></tr>
+            <tr><td>مبيعات محفظة</td><td style="text-align:left">${money(data.sales.wallet || 0, '')}</td><td style="text-align:left"></td></tr>
             <tr><td>مبيعات آجلة</td><td style="text-align:left">${money(data.sales.credit, '')}</td><td style="text-align:left"></td></tr>
             <tr><td>مرتجعات</td><td style="text-align:left">-${money(data.returns.total, '')}</td><td style="text-align:left">${data.returns.count}</td></tr>
             <tr><td><b>صافي المبيعات</b></td><td style="text-align:left"><b>${money(data.net_sales, '')}</b></td><td style="text-align:left"></td></tr>

@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS shifts (
   total_sales REAL NOT NULL DEFAULT 0,
   total_cash REAL NOT NULL DEFAULT 0,
   total_card REAL NOT NULL DEFAULT 0,
+  total_wallet REAL NOT NULL DEFAULT 0,
   total_credit REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'open',
   notes TEXT,
@@ -152,6 +153,19 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS invoice_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id INTEGER NOT NULL,
+  method TEXT NOT NULL DEFAULT 'cash',
+  amount REAL NOT NULL DEFAULT 0,
+  currency TEXT,
+  amount_original REAL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_payments_method ON invoice_payments(method);
 
 CREATE TABLE IF NOT EXISTS expenses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -419,6 +433,12 @@ const DEFAULT_SETTINGS = [
   ["negative_stock", "0", "inventory"],
   ["auto_barcode", "1", "inventory"],
   ["default_pos_mode", "fast", "pos"],
+  ["scale_enabled", "0", "pos"],
+  ["scale_mode", "weight", "pos"],
+  ["scale_prefix", "2", "pos"],
+  ["scale_plu_len", "5", "pos"],
+  ["scale_value_len", "5", "pos"],
+  ["scale_value_decimals", "3", "pos"],
   ["invoice_prefix_sale", "INV", "financial"],
   ["invoice_prefix_purchase", "PUR", "financial"],
   ["shift_required", "0", "pos"],
@@ -442,6 +462,11 @@ const DEFAULT_SETTINGS = [
   ["reminder_signature", "", "reminders"],
   ["reminder_last_digest", "", "reminders"],
   ["reminder_last_digest_at", "", "reminders"],
+  ["zakat_rate", "2.5", "financial"],
+  ["zakat_nisab_grams", "85", "financial"],
+  ["zakat_gold_price", "0", "financial"],
+  ["zakat_include_receivables", "1", "financial"],
+  ["zakat_include_liabilities", "1", "financial"],
 ];
 
 const INDUSTRY_PRESETS = {

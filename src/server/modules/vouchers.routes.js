@@ -148,12 +148,20 @@ function buildZReport(date) {
   const day = date || db.get("SELECT date('now','localtime') AS d").d;
   const range = 'date(created_at) = date(?)';
   const sales = db.get(
-    `SELECT COUNT(*) AS count, COALESCE(SUM(total),0) AS total,
-            COALESCE(SUM(CASE WHEN payment_method='cash' THEN total ELSE 0 END),0) AS cash,
-            COALESCE(SUM(CASE WHEN payment_method='card' THEN total ELSE 0 END),0) AS card,
-            COALESCE(SUM(CASE WHEN payment_method='credit' THEN total ELSE 0 END),0) AS credit
+    `SELECT COUNT(*) AS count, COALESCE(SUM(total),0) AS total, COALESCE(SUM(due),0) AS credit
      FROM invoices WHERE type='sale' AND ${range}`, [day]
   );
+  const payRows = db.all(
+    `SELECT method, COALESCE(SUM(amount),0) AS total FROM (
+       SELECT ip.method AS method, ip.amount AS amount FROM invoice_payments ip
+       JOIN invoices i ON i.id = ip.invoice_id WHERE i.type='sale' AND date(i.created_at) = date(?)
+       UNION ALL
+       SELECT i.payment_method AS method, i.paid AS amount FROM invoices i
+       WHERE i.type='sale' AND i.paid > 0 AND NOT EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_id = i.id)
+         AND date(i.created_at) = date(?)
+     ) GROUP BY method`, [day, day]
+  );
+  const methodTotal = (m) => Number((payRows.find((r) => r.method === m) || {}).total) || 0;
   const returns = db.get(
     `SELECT COUNT(*) AS count, COALESCE(SUM(total),0) AS total FROM invoices WHERE type='return_sale' AND ${range}`, [day]
   );
@@ -193,8 +201,8 @@ function buildZReport(date) {
     date: day,
     generated_at: new Date().toISOString(),
     sales: {
-      count: sales.count, total: Number(sales.total), cash: Number(sales.cash),
-      card: Number(sales.card), credit: Number(sales.credit),
+      count: sales.count, total: Number(sales.total), cash: methodTotal('cash'),
+      card: methodTotal('card'), wallet: methodTotal('wallet'), credit: Number(sales.credit),
     },
     returns: { count: returns.count, total: Number(returns.total) },
     net_sales: netSales,

@@ -1,5 +1,13 @@
 import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, formToObject, debounce, downloadFile } from '../core.js';
 
+const SOURCE_LABELS = {
+  sale: 'مبيعات', sale_cash: 'مبيعات نقدية', sale_card: 'مبيعات بطاقة', sale_wallet: 'مبيعات محفظة',
+  purchase: 'مشتريات', return_sale: 'مرتجع مبيعات', return_sale_cash: 'مرتجع نقدي', return_sale_card: 'مرتجع بطاقة', return_sale_wallet: 'مرتجع محفظة',
+  return_purchase: 'مرتجع مشتريات', expense: 'مصروف', receipt: 'سند قبض', payout: 'سند صرف',
+  manual: 'حركة يدوية', deposit: 'إيداع', withdraw: 'سحب',
+};
+const sourceLabel = (s) => SOURCE_LABELS[s] || s;
+
 export async function renderAccounting(c) {
   const tabs = [
     { key: 'treasury', label: 'الخزنة', icon: 'bi-wallet2' },
@@ -55,7 +63,7 @@ export async function renderAccounting(c) {
         </div>
         <div class="overflow-auto max-h-[55vh]"><table class="w-full">
           <thead><tr><th class="th">التاريخ</th><th class="th">النوع</th><th class="th">المصدر</th><th class="th">البيان</th><th class="th">المبلغ</th><th class="th">الرصيد</th></tr></thead>
-          <tbody>${data.rows.map((r) => `<tr class="tr"><td class="td text-xs">${esc(r.created_at)}</td><td class="td">${r.direction === 'in' ? '<span class="badge badge-ok">وارد</span>' : '<span class="badge badge-danger">صادر</span>'}</td><td class="td text-xs">${esc(r.source)}</td><td class="td">${esc(r.description || '-')}</td><td class="td font-bold ${r.direction === 'in' ? 'text-emerald-600' : 'text-rose-600'}">${money(r.amount, '')}</td><td class="td">${money(r.balance_after, '')}</td></tr>`).join('') || '<tr><td colspan="6" class="td text-center text-slate-400 py-8">لا توجد حركات</td></tr>'}</tbody>
+          <tbody>${data.rows.map((r) => `<tr class="tr"><td class="td text-xs">${esc(r.created_at)}</td><td class="td">${r.direction === 'in' ? '<span class="badge badge-ok">وارد</span>' : '<span class="badge badge-danger">صادر</span>'}</td><td class="td text-xs">${esc(sourceLabel(r.source))}</td><td class="td">${esc(r.description || '-')}</td><td class="td font-bold ${r.direction === 'in' ? 'text-emerald-600' : 'text-rose-600'}">${money(r.amount, '')}</td><td class="td">${money(r.balance_after, '')}</td></tr>`).join('') || '<tr><td colspan="6" class="td text-center text-slate-400 py-8">لا توجد حركات</td></tr>'}</tbody>
         </table></div>
       </div>`;
     p.querySelector('#trAdd').addEventListener('click', () => {
@@ -232,6 +240,7 @@ export async function renderAccounting(c) {
           <div class="p-4 space-y-2 text-sm">
             <div class="flex justify-between"><span>مبيعات نقدية</span><b>${money(data.sales.cash)}</b></div>
             <div class="flex justify-between"><span>مبيعات بطاقة</span><b>${money(data.sales.card)}</b></div>
+            <div class="flex justify-between"><span>مبيعات محفظة</span><b>${money(data.sales.wallet || 0)}</b></div>
             <div class="flex justify-between"><span>مبيعات آجلة</span><b>${money(data.sales.credit)}</b></div>
             <div class="flex justify-between text-rose-600"><span>مرتجعات (${data.returns.count})</span><b>-${money(data.returns.total)}</b></div>
             <div class="flex justify-between border-b border-dashed pb-2"><span class="font-bold">صافي المبيعات</span><b class="text-zain-700">${money(data.net_sales)}</b></div>

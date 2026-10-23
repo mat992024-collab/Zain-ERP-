@@ -100,22 +100,77 @@ function normalizeItems(rawItems) {
       discount,
       total,
       tax_rate: taxRate,
+      restock: item.restock === false ? false : true,
       product,
     };
   });
 }
 
-function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId, items, discount, tax, taxInclusive, paid, paymentMethod, notes, installmentPlan, currencyCode, exchangeRate, totalOriginal, paidOriginal }) {
+const PAY_METHODS = ['cash', 'card', 'wallet'];
+const PAY_LABELS = { cash: 'نقدي', card: 'بطاقة', wallet: 'محفظة', credit: 'آجل', mixed: 'مختلط' };
+
+function normalizePayments(payments, paymentMethod, applied) {
+  const list = [];
+  if (Array.isArray(payments)) {
+    for (const p of payments) {
+      const method = p && PAY_METHODS.includes(p.method) ? p.method : null;
+      const amount = round2(Number(p && p.amount) || 0);
+      if (!method || amount <= 0) continue;
+      list.push({ method, amount });
+    }
+  }
+  if (!list.length) {
+    const method = PAY_METHODS.includes(paymentMethod) ? paymentMethod : 'cash';
+    return applied > 0 ? [{ method, amount: applied }] : [];
+  }
+  let sum = round2(list.reduce((s, p) => s + p.amount, 0));
+  let change = round2(sum - applied);
+  const trim = (onlyCash) => {
+    for (let i = list.length - 1; i >= 0 && change > 0; i--) {
+      if (onlyCash && list[i].method !== 'cash') continue;
+      const cut = Math.min(list[i].amount, change);
+      list[i].amount = round2(list[i].amount - cut);
+      change = round2(change - cut);
+    }
+  };
+  if (change > 0) {
+    trim(true);
+    trim(false);
+  }
+  return list.filter((p) => p.amount > 0);
+}
+
+function paymentMethodOf(breakdown, applied, fallback) {
+  const methods = [...new Set(breakdown.map((p) => p.method))];
+  if (methods.length > 1) return 'mixed';
+  if (methods.length === 1) return methods[0];
+  if (applied > 0) return PAY_METHODS.includes(fallback) ? fallback : 'cash';
+  return 'credit';
+}
+
+function treasurySourceOf(method, direction) {
+  if (method === 'cash') return direction === 'in' ? 'sale_cash' : 'return_sale';
+  if (method === 'card') return direction === 'in' ? 'sale_card' : 'return_card';
+  return direction === 'in' ? 'sale_wallet' : 'return_wallet';
+}
+
+function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId, items, discount, tax, taxInclusive, paid, paymentMethod, payments, notes, installmentPlan, currencyCode, exchangeRate, totalOriginal, paidOriginal, damage }) {
   const subtotal = round2(items.reduce((s, i) => s + i.qty * i.unit_price, 0));
   const itemsDiscount = round2(items.reduce((s, i) => s + i.discount, 0));
   const invoiceDiscount = round2(discount || 0);
   const taxAmount = round2(tax || 0);
   const total = round2(subtotal - itemsDiscount - invoiceDiscount + (taxInclusive ? 0 : taxAmount));
   const paidAmount = paid === undefined || paid === null ? (paymentMethod === 'credit' ? 0 : total) : round2(paid);
-  const due = round2(total - paidAmount);
+  const applied = round2(Math.max(0, Math.min(paidAmount, total)));
+  const breakdown = normalizePayments(payments, paymentMethod, applied);
+  const storedMethod = paymentMethodOf(breakdown, applied, paymentMethod);
+  const due = round2(total - applied);
 
   if (paymentMethod === 'credit' && type === 'sale' && !customerId) {
     throw new HttpError(400, 'البيع بالآجل يتطلب اختيار عميل');
+  }
+  if (due > 0 && type === 'sale' && !customerId) {
+    throw new HttpError(400, 'المبلغ المتبقي يتطلب اختيار عميل (بيع آجل)');
   }
 
   const invoiceNo = ledger.nextInvoiceNo(type);
@@ -124,15 +179,23 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
     const res = db.run(
       `INSERT INTO invoices (invoice_no, type, pos_mode, customer_id, supplier_id, user_id, shift_id,
         subtotal, discount, tax, tax_inclusive, total, paid, due, payment_method, status, notes, installment_plan,
-        currency, exchange_rate, total_original, paid_original)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)`,
+        currency, exchange_rate, total_original, paid_original, payments)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?)`,
       [invoiceNo, type, posMode, customerId || null, supplierId || null, userId || null, shiftId || null,
-        subtotal, round2(itemsDiscount + invoiceDiscount), taxAmount, taxInclusive ? 1 : 0, total, paidAmount, due,
-        paymentMethod, notes || null, installmentPlan ? JSON.stringify(installmentPlan) : null,
+        subtotal, round2(itemsDiscount + invoiceDiscount), taxAmount, taxInclusive ? 1 : 0, total, applied, due,
+        storedMethod, notes || null, installmentPlan ? JSON.stringify(installmentPlan) : null,
         currencyCode || null, exchangeRate || 1, totalOriginal === undefined ? null : totalOriginal,
-        paidOriginal === undefined ? null : paidOriginal]
+        paidOriginal === undefined ? null : paidOriginal, JSON.stringify(breakdown)]
     );
     invoiceId = Number(res.lastInsertRowid);
+
+    for (const p of breakdown) {
+      db.run(
+        `INSERT INTO invoice_payments (invoice_id, method, amount, currency, amount_original)
+         VALUES (?, ?, ?, ?, ?)`,
+        [invoiceId, p.method, p.amount, currencyCode || null, currencyCode && breakdown.length === 1 && paidOriginal !== undefined ? paidOriginal : null]
+      );
+    }
 
     for (const item of items) {
       db.run(
@@ -141,6 +204,15 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
         [invoiceId, item.product_id, item.name, item.qty, item.unit, item.unit_price, item.cost_price, item.discount, item.total]
       );
       if (item.product) {
+        const restock = type !== 'return_sale' || item.restock !== false;
+        if (!restock) {
+          recordMovement(
+            item.product.id, 'damage', item.qty, Number(item.product.quantity),
+            `${MOVEMENT_LABELS[type] || type} تالف - ${invoiceNo}`,
+            'invoices', invoiceId, userId
+          );
+          continue;
+        }
         const delta = type === 'purchase' || type === 'return_sale' ? item.qty : -item.qty;
         const newQty = round2(Number(item.product.quantity) + delta);
         if (newQty < 0 && db.getSetting('negative_stock', '0') === '0') {
@@ -164,14 +236,15 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
     if (isSale || isPurchase) {
       if (isSale) {
         if (customerId && due > 0) db.run('UPDATE customers SET balance = balance + ? WHERE id = ?', [due, customerId]);
-        if (paidAmount > 0) {
-          const isCash = paymentMethod === 'cash';
+        for (const p of breakdown) {
           ledger.addTreasury({
-            direction: 'in', amount: paidAmount, source: isCash ? 'sale_cash' : 'sale_card',
-            refTable: 'invoices', refId: invoiceId, description: `فاتورة بيع ${invoiceNo}`,
+            direction: 'in', amount: p.amount, source: treasurySourceOf(p.method, 'in'),
+            refTable: 'invoices', refId: invoiceId, description: `فاتورة بيع ${invoiceNo} (${PAY_LABELS[p.method]})`,
             userId, shiftId,
           });
-          ledger.addAccountEntry({ code: '1100', direction: 'debit', amount: paidAmount, refTable: 'invoices', refId: invoiceId, description: `فاتورة ${invoiceNo}` });
+        }
+        if (applied > 0) {
+          ledger.addAccountEntry({ code: '1100', direction: 'debit', amount: applied, refTable: 'invoices', refId: invoiceId, description: `فاتورة ${invoiceNo}` });
         }
         if (due > 0) ledger.addAccountEntry({ code: '1300', direction: 'debit', amount: due, refTable: 'invoices', refId: invoiceId, description: `آجل ${invoiceNo}` });
         ledger.addAccountEntry({ code: '4100', direction: 'credit', amount: round2(total - taxAmount), refTable: 'invoices', refId: invoiceId, description: `إيراد ${invoiceNo}` });
@@ -182,13 +255,13 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
         }
       } else {
         if (supplierId && due > 0) db.run('UPDATE suppliers SET balance = balance + ? WHERE id = ?', [due, supplierId]);
-        if (paidAmount > 0) {
+        if (applied > 0) {
           ledger.addTreasury({
-            direction: 'out', amount: paidAmount, source: 'purchase', refTable: 'invoices',
+            direction: 'out', amount: applied, source: 'purchase', refTable: 'invoices',
             refId: invoiceId, description: `فاتورة شراء ${invoiceNo}`, userId, shiftId,
           });
-          ledger.addAccountEntry({ code: '2100', direction: 'debit', amount: paidAmount, refTable: 'invoices', refId: invoiceId, description: `دفعة شراء ${invoiceNo}` });
-          ledger.addAccountEntry({ code: '1100', direction: 'credit', amount: paidAmount, refTable: 'invoices', refId: invoiceId, description: `صرف نقدي ${invoiceNo}` });
+          ledger.addAccountEntry({ code: '2100', direction: 'debit', amount: applied, refTable: 'invoices', refId: invoiceId, description: `دفعة شراء ${invoiceNo}` });
+          ledger.addAccountEntry({ code: '1100', direction: 'credit', amount: applied, refTable: 'invoices', refId: invoiceId, description: `صرف نقدي ${invoiceNo}` });
         }
         if (due > 0) ledger.addAccountEntry({ code: '2100', direction: 'credit', amount: due, refTable: 'invoices', refId: invoiceId, description: `آجل مورد ${invoiceNo}` });
         ledger.addAccountEntry({ code: '1200', direction: 'debit', amount: round2(total - taxAmount), refTable: 'invoices', refId: invoiceId, description: `إضافة مخزون ${invoiceNo}` });
@@ -200,16 +273,18 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
       if (customerId && due > 0) db.run('UPDATE customers SET balance = balance - ? WHERE id = ?', [due, customerId]);
       ledger.addAccountEntry({ code: '4100', direction: 'debit', amount: round2(total - taxAmount), refTable: 'invoices', refId: invoiceId, description: `مرتجع ${invoiceNo}` });
       if (taxAmount > 0) ledger.addAccountEntry({ code: '2300', direction: 'debit', amount: taxAmount, refTable: 'invoices', refId: invoiceId, description: `ضريبة مرتجع ${invoiceNo}` });
-      if (paidAmount > 0) {
+      if (applied > 0) {
+        const refundMethod = breakdown[0] ? breakdown[0].method : 'cash';
         ledger.addTreasury({
-          direction: 'out', amount: paidAmount, source: 'return_sale', refTable: 'invoices',
-          refId: invoiceId, description: `مرتجع بيع ${invoiceNo}`, userId, shiftId,
+          direction: 'out', amount: applied, source: treasurySourceOf(refundMethod, 'out'), refTable: 'invoices',
+          refId: invoiceId, description: `مرتجع بيع ${invoiceNo} (${PAY_LABELS[refundMethod]})`, userId, shiftId,
         });
-        ledger.addAccountEntry({ code: '1100', direction: 'credit', amount: paidAmount, refTable: 'invoices', refId: invoiceId, description: `رد نقدي ${invoiceNo}` });
+        ledger.addAccountEntry({ code: '1100', direction: 'credit', amount: applied, refTable: 'invoices', refId: invoiceId, description: `رد نقدي ${invoiceNo}` });
       }
-      if (costTotal > 0) {
-        ledger.addAccountEntry({ code: '1200', direction: 'debit', amount: costTotal, refTable: 'invoices', refId: invoiceId, description: `إرجاع مخزون ${invoiceNo}` });
-        ledger.addAccountEntry({ code: '5100', direction: 'credit', amount: costTotal, refTable: 'invoices', refId: invoiceId, description: `عكس تكلفة ${invoiceNo}` });
+      const restockedCost = round2(items.reduce((s, i) => s + (i.restock === false ? 0 : i.cost_price * i.qty), 0));
+      if (restockedCost > 0) {
+        ledger.addAccountEntry({ code: '1200', direction: 'debit', amount: restockedCost, refTable: 'invoices', refId: invoiceId, description: `إرجاع مخزون ${invoiceNo}` });
+        ledger.addAccountEntry({ code: '5100', direction: 'credit', amount: restockedCost, refTable: 'invoices', refId: invoiceId, description: `عكس تكلفة ${invoiceNo}` });
       }
     }
 
@@ -239,15 +314,20 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
     }
 
     if (shiftId && (isSale || isReturnSale)) {
-      const isCash = paymentMethod === 'cash';
       const sign = isReturnSale ? -1 : 1;
+      const amountOf = (method) => breakdown.filter((p) => p.method === method).reduce((s, p) => s + p.amount, 0);
+      const cash = round2(amountOf('cash'));
+      const card = round2(amountOf('card'));
+      const wallet = round2(amountOf('wallet'));
+      const rest = round2(applied - cash - card - wallet);
       db.run(
         `UPDATE shifts SET total_sales = total_sales + ?,
           total_cash = total_cash + ?,
           total_card = total_card + ?,
+          total_wallet = total_wallet + ?,
           total_credit = total_credit + ?
          WHERE id = ?`,
-        [sign * total, isCash ? sign * paidAmount : 0, isCash ? 0 : sign * paidAmount, sign * due, shiftId]
+        [sign * total, sign * cash, sign * card, sign * (wallet + Math.max(rest, 0)), sign * due, shiftId]
       );
     }
   });
@@ -273,6 +353,7 @@ function mapReturnItems(originalItems, requested, label) {
       unit_price: src.unit_price,
       cost_price: src.cost_price,
       discount: 0,
+      restock: r.damaged !== true,
     };
   });
 }
@@ -344,8 +425,9 @@ module.exports = {
       invoice.profit = profitOf(invoice);
       invoice.margin_pct = Number(invoice.total) ? round2((invoice.profit / Number(invoice.total)) * 100) : 0;
       const items = db.all('SELECT * FROM invoice_items WHERE invoice_id = ?', [ctx.params.id]);
-      const payments = db.all('SELECT * FROM treasury WHERE ref_table = \'invoices\' AND ref_id = ? ORDER BY id', [ctx.params.id]);
-      sendJson(ctx.res, 200, { invoice, items, payments });
+      const treasury = db.all('SELECT * FROM treasury WHERE ref_table = \'invoices\' AND ref_id = ? ORDER BY id', [ctx.params.id]);
+      const payments = db.all('SELECT method, amount, currency FROM invoice_payments WHERE invoice_id = ? ORDER BY id', [ctx.params.id]);
+      sendJson(ctx.res, 200, { invoice, items, treasury, payments });
     });
 
     router.post('/api/sales/:id/repeat', (ctx) => {
@@ -366,10 +448,24 @@ module.exports = {
       const items = normalizeItems(rows);
       const itemsDiscount = round2(items.reduce((s, i) => s + i.discount, 0));
       const invoiceDiscount = Math.max(round2(Number(inv.discount) - itemsDiscount), 0);
-      if (!isPurchase && inv.payment_method === 'credit') {
+      const newSubtotal = round2(items.reduce((s, i) => s + i.qty * i.unit_price, 0));
+      const newTotal = round2(newSubtotal - itemsDiscount - invoiceDiscount + (Number(inv.tax_inclusive) ? 0 : Number(inv.tax) || 0));
+      const ratio = Number(inv.total) ? Math.min(1, (Number(inv.paid) || 0) / Number(inv.total)) : 1;
+      const repeatPaid = round2(newTotal * ratio);
+      let repeatPayments = null;
+      if (inv.payment_method === 'mixed') {
+        const src = db.all('SELECT method, amount FROM invoice_payments WHERE invoice_id = ?', [inv.id]);
+        const srcSum = round2(src.reduce((s, p) => s + Number(p.amount), 0));
+        if (src.length && srcSum > 0) {
+          repeatPayments = src.map((p) => ({ method: p.method, amount: round2(Number(p.amount) * (repeatPaid / srcSum)) }));
+          const diff = round2(repeatPaid - repeatPayments.reduce((s, p) => s + p.amount, 0));
+          if (diff) repeatPayments[repeatPayments.length - 1].amount = round2(repeatPayments[repeatPayments.length - 1].amount + diff);
+        }
+      }
+      if (!isPurchase && newTotal - repeatPaid > 0 && inv.customer_id) {
         creditLimitCheck({
           customerId: inv.customer_id,
-          due: Number(inv.total) || 0,
+          due: round2(newTotal - repeatPaid),
           force: (ctx.body || {}).force_credit_limit === true,
           canOverride: ctx.can('sales.write'),
         });
@@ -384,7 +480,9 @@ module.exports = {
         discount: invoiceDiscount,
         tax: Number(inv.tax) || 0,
         taxInclusive: !!inv.tax_inclusive,
+        paid: repeatPaid,
         paymentMethod: inv.payment_method,
+        payments: repeatPayments,
         notes: `تكرار ${inv.invoice_no}`,
       });
       db.logActivity(ctx.user.id, isPurchase ? 'purchase' : 'sale', 'invoices', result.id, {
@@ -417,18 +515,32 @@ module.exports = {
         - (Number(body.discount) || 0)
         + (taxInclusive ? 0 : taxValue)
       );
-      const paidValue = body.paid === undefined || body.paid === null
-        ? (body.payment_method === 'credit' ? 0 : total)
-        : round2(body.paid);
+      const split = Array.isArray(body.payments) && body.payments.length
+        ? body.payments.map((p) => ({ method: p && p.method, amount: round2(Number(p && p.amount) || 0) }))
+        : null;
+      if (split) {
+        for (const p of split) {
+          if (!PAY_METHODS.includes(p.method)) throw new HttpError(400, `طريقة دفع غير صالحة: ${p.method || ''}`);
+          if (p.amount < 0) throw new HttpError(400, 'مبلغ الدفع لا يمكن أن يكون سالباً');
+        }
+      }
+      const splitSum = split ? round2(split.reduce((s, p) => s + p.amount, 0)) : null;
+      const paidValue = split
+        ? splitSum
+        : body.paid === undefined || body.paid === null
+          ? (body.payment_method === 'credit' ? 0 : total)
+          : round2(body.paid);
       const due = round2(total - paidValue);
       const cur = currency.currencyOf(body.currency);
       const rate = Number(cur.rate) || 1;
+      const isCredit = !split && body.payment_method === 'credit';
       let paidBase = paidValue;
       let paidOriginal = round2(paidValue);
       let totalOriginal = round2(total);
       if (!cur.is_base) {
+        if (split) throw new HttpError(400, 'الدفع المقسّم متاح بالعملة الأساسية فقط');
         totalOriginal = currency.roundTo(total / rate, cur.decimals);
-        if (body.payment_method === 'credit') {
+        if (isCredit) {
           paidBase = 0;
           paidOriginal = 0;
         } else {
@@ -461,7 +573,8 @@ module.exports = {
         tax: taxValue,
         taxInclusive,
         paid: paidBase,
-        paymentMethod: body.payment_method || 'cash',
+        paymentMethod: split ? (new Set(split.filter((p) => p.amount > 0).map((p) => p.method)).size > 1 ? 'mixed' : (split.find((p) => p.amount > 0) || {}).method || 'cash') : (body.payment_method || 'cash'),
+        payments: split,
         notes: body.notes,
         installmentPlan: body.installment_plan,
         currencyCode: cur.code,
@@ -549,11 +662,13 @@ module.exports = {
       const originalItems = db.all('SELECT * FROM invoice_items WHERE invoice_id = ?', [original.id]);
       const requested = Array.isArray(ctx.body.items) ? ctx.body.items : null;
       const items = normalizeItems(mapReturnItems(originalItems, requested, 'الفاتورة الأصلية'));
+      if ((ctx.body || {}).damaged === true) items.forEach((i) => { i.restock = false; });
       const itemsTotal = round2(items.reduce((s, i) => s + i.total, 0));
       const originalSubtotal = Number(original.subtotal) || 0;
       const taxShare = originalSubtotal > 0
         ? round2((Number(original.tax) || 0) * (itemsTotal / originalSubtotal))
         : 0;
+      const refundMethod = PAY_METHODS.includes(original.payment_method) ? original.payment_method : 'cash';
       const result = persistInvoice({
         type: 'return_sale',
         posMode: original.pos_mode,
@@ -565,8 +680,12 @@ module.exports = {
         tax: taxShare,
         taxInclusive: Number(original.tax_inclusive) === 1,
         paid: ctx.body.refund === false ? 0 : itemsTotal + (Number(original.tax_inclusive) === 1 ? 0 : taxShare),
-        paymentMethod: original.payment_method,
-        notes: `مرتجع من الفاتورة ${original.invoice_no}`,
+        paymentMethod: refundMethod,
+        notes: `${items.some((i) => i.restock === false) ? 'مرتجع تالف ' : 'مرتجع '}من الفاتورة ${original.invoice_no}`,
+      });
+      db.logActivity(ctx.user.id, 'sale_return', 'invoices', result.id, {
+        source: original.invoice_no,
+        damaged: items.filter((i) => i.restock === false).length,
       });
       sendJson(ctx.res, 201, { invoice: db.get('SELECT * FROM invoices WHERE id = ?', [result.id]), id: result.id });
     });

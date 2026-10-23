@@ -542,19 +542,43 @@ function openPaymentModal(t) {
       ${hasForeign ? field('عملة الدفع', `<select id="payCurrency" class="field">${currencies.map((c) => `<option value="${esc(c.code)}" ${c.is_base ? 'selected' : ''}>${esc(c.code)} — ${esc(c.name)} (${esc(c.symbol || c.code)})</option>`).join('')}</select>`) : ''}
       <div class="mb-3">
         <label class="label">طريقة الدفع</label>
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-3 gap-2" id="pmRow">
           <button data-pm="cash" class="pm-btn btn btn-primary">نقدي</button>
           <button data-pm="card" class="pm-btn btn btn-ghost">بطاقة</button>
+          <button data-pm="wallet" class="pm-btn btn btn-ghost">محفظة</button>
           <button data-pm="credit" class="pm-btn btn btn-ghost">آجل</button>
+          <button data-pm="mixed" class="pm-btn btn btn-ghost">مختلط</button>
         </div>
       </div>
-      ${field('المبلغ المدفوع', `<input id="payAmount" type="number" value="${t.total}" class="field !text-lg font-bold" />`)}
-      <div id="changeBox" class="mt-3 text-center text-sm"></div>`,
+      <div id="singlePay">
+        ${field('المبلغ المدفوع', `<input id="payAmount" type="number" value="${t.total}" class="field !text-lg font-bold" />`)}
+      </div>
+      <div id="mixedPay" class="hidden">
+        <div class="grid grid-cols-3 gap-2">
+          ${field('نقدي', `<input id="payCash" type="number" step="0.01" value="${t.total}" class="field font-bold" />`)}
+          ${field('بطاقة', `<input id="payCard" type="number" step="0.01" value="0" class="field font-bold" />`)}
+          ${field('محفظة', `<input id="payWallet" type="number" step="0.01" value="0" class="field font-bold" />`)}
+        </div>
+        <div class="flex items-center justify-between gap-2 mt-1">
+          <button type="button" id="payFill" class="btn btn-ghost btn-sm"><i class="bi bi-magic"></i> توزيع الباقي نقداً</button>
+          <div id="mixRemain" class="text-sm font-bold text-slate-500"></div>
+        </div>
+        <div class="text-[10px] text-slate-400 mt-1">الدفع المقسّم متاح بالعملة الأساسية فقط.</div>
+      </div>
+      <div id="changeBox" class="mt-3 text-center text-sm"></div>
+      <div id="discountLine" class="mt-1 text-center text-[11px] text-slate-500"></div>`,
     footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="confirmPay" class="btn btn-success"><i class="bi bi-check2-circle"></i> تأكيد وطباعة</button>`,
     onMount(wrap, close) {
       let method = 'cash';
+      const singleBox = wrap.querySelector('#singlePay');
+      const mixedBox = wrap.querySelector('#mixedPay');
       const amount = wrap.querySelector('#payAmount');
+      const cashIn = wrap.querySelector('#payCash');
+      const cardIn = wrap.querySelector('#payCard');
+      const walletIn = wrap.querySelector('#payWallet');
       const changeBox = wrap.querySelector('#changeBox');
+      const mixRemain = wrap.querySelector('#mixRemain');
+      const discountLine = wrap.querySelector('#discountLine');
       const curSel = wrap.querySelector('#payCurrency');
       const totalBox = wrap.querySelector('#payTotal');
       const baseLine = wrap.querySelector('#payBaseLine');
@@ -587,6 +611,7 @@ function openPaymentModal(t) {
         const c = curOf();
         return isForeign() ? (c.symbol || c.code) : (state.settings.currency_symbol || 'د.ع');
       };
+      const mixedPaid = () => roundTo((Number(cashIn.value) || 0) + (Number(cardIn.value) || 0) + (Number(walletIn.value) || 0), curOf().decimals);
       const update = () => {
         const cur = curOf();
         const totalF = totalIn();
@@ -594,48 +619,101 @@ function openPaymentModal(t) {
         const rate = Number(cur.rate) || 1;
         const baseEquivalent = cur.is_base ? t.total : roundTo(totalsIn(cur).total * rate, 2);
         baseLine.textContent = isForeign() ? `يعادل ${money(baseEquivalent)} بسعر 1 ${esc(cur.code)} = ${rate} ${esc(base.code)}` : '';
-        const paid = Number(amount.value) || 0;
-        changeBox.innerHTML = paid >= totalF
-          ? `<span class="text-emerald-600 font-bold">المتبقي للعميل: ${money(paid - totalF, symbolOf())}</span>`
-          : `<span class="text-amber-600 font-bold">الباقي على العميل: ${money(totalF - paid, symbolOf())}</span>`;
+        const disc = [];
+        if (t.itemsDisc) disc.push(`خصم أصناف ${money(t.itemsDisc)}`);
+        if (Number(state.cartMeta.discount || 0)) disc.push(`خصم فاتورة ${money(Number(state.cartMeta.discount) || 0)}`);
+        discountLine.textContent = disc.length ? `بند الخصم: ${disc.join(' + ')}` : '';
+        if (method === 'mixed') {
+          const paid = mixedPaid();
+          const diff = roundTo(totalF - paid, 2);
+          mixRemain.className = `text-sm font-bold ${diff > 0.009 ? 'text-amber-600' : 'text-emerald-600'}`;
+          mixRemain.textContent = diff > 0.009 ? `الباقي: ${money(diff, symbolOf())}` : diff < -0.009 ? `المتبقي للعميل: ${money(-diff, symbolOf())}` : 'مكتمل';
+          changeBox.innerHTML = '';
+        } else {
+          const paid = Number(amount.value) || 0;
+          changeBox.innerHTML = paid >= totalF
+            ? `<span class="text-emerald-600 font-bold">المتبقي للعميل: ${money(paid - totalF, symbolOf())}</span>`
+            : `<span class="text-amber-600 font-bold">الباقي على العميل: ${money(totalF - paid, symbolOf())}</span>`;
+        }
+      };
+      const setMethod = (next) => {
+        if (next === 'mixed' && isForeign()) {
+          toast('الدفع المقسّم متاح بالعملة الأساسية فقط', 'error');
+          return;
+        }
+        method = next;
+        wrap.querySelectorAll('.pm-btn').forEach((x) => { x.className = 'pm-btn btn btn-ghost'; });
+        const btn = wrap.querySelector(`.pm-btn[data-pm="${method}"]`);
+        if (btn) btn.className = 'pm-btn btn btn-primary';
+        singleBox.classList.toggle('hidden', method === 'mixed');
+        mixedBox.classList.toggle('hidden', method !== 'mixed');
+        if (method === 'mixed') {
+          cashIn.value = totalIn();
+          cardIn.value = 0;
+          walletIn.value = 0;
+        } else if (method === 'credit') {
+          amount.value = 0;
+        } else {
+          amount.value = totalIn();
+        }
+        update();
       };
       amount.addEventListener('input', update);
+      [cashIn, cardIn, walletIn].forEach((el) => el.addEventListener('input', update));
+      const fillBtn = wrap.querySelector('#payFill');
+      if (fillBtn) fillBtn.addEventListener('click', () => {
+        const totalF = totalIn();
+        const others = roundTo((Number(cardIn.value) || 0) + (Number(walletIn.value) || 0), 2);
+        cashIn.value = Math.max(roundTo(totalF - others, 2), 0);
+        update();
+      });
       if (curSel) {
         curSel.addEventListener('change', () => {
-          amount.value = method === 'credit' ? 0 : totalIn();
+          if (method === 'mixed' && isForeign()) setMethod('cash');
+          else if (method !== 'mixed') amount.value = method === 'credit' ? 0 : totalIn();
           update();
         });
       }
       update();
-      wrap.querySelectorAll('.pm-btn').forEach((b) => b.addEventListener('click', () => {
-        method = b.dataset.pm;
-        wrap.querySelectorAll('.pm-btn').forEach((x) => { x.className = 'pm-btn btn btn-ghost'; });
-        b.className = 'pm-btn btn btn-primary';
-        if (method === 'credit') amount.value = 0;
-        else amount.value = totalIn();
-        update();
-      }));
+      wrap.querySelectorAll('.pm-btn').forEach((b) => b.addEventListener('click', () => setMethod(b.dataset.pm)));
       wrap.querySelector('[data-cancel]').addEventListener('click', close);
       wrap.querySelector('#confirmPay').addEventListener('click', async () => {
-        const paidForeign = Number(amount.value) || 0;
         const cur = curOf();
         const rate = Number(cur.rate) || 1;
-        const paidBase = isForeign() ? roundTo(paidForeign * rate, 4) : paidForeign;
+        let paidForeign = 0;
+        let paidBase = 0;
+        let split = null;
+        if (method === 'mixed') {
+          split = [
+            { method: 'cash', amount: roundTo(Number(cashIn.value) || 0, 2) },
+            { method: 'card', amount: roundTo(Number(cardIn.value) || 0, 2) },
+            { method: 'wallet', amount: roundTo(Number(walletIn.value) || 0, 2) },
+          ].filter((p) => p.amount > 0);
+          const sum = roundTo(split.reduce((s, p) => s + p.amount, 0), 2);
+          if (sum <= 0) { toast('أدخل مبالغ الدفع المقسّم', 'error'); return; }
+          if (sum < totalIn() - 0.01 && !state.cartMeta.customer_id) { toast('المبلغ المتبقي يتطلب اختيار عميل', 'error'); return; }
+          paidBase = sum;
+          paidForeign = sum;
+        } else {
+          paidForeign = Number(amount.value) || 0;
+          paidBase = isForeign() ? roundTo(paidForeign * rate, 4) : paidForeign;
+        }
         const items = state.cart.map((i) => ({
           product_id: i.product_id,
           qty: i.qty,
           unit_price: isForeign() ? roundTo(itemPriceIn(i, cur) * rate, 4) : i.unit_price,
           discount: i.discount,
         }));
+        const send = (force) => submitSale(method, paidBase, force, cur.code, paidForeign, items, split);
         try {
-          const res = await submitSale(method, paidBase, false, cur.code, paidForeign, items);
+          const res = await send(false);
           close();
           await afterSale(res);
         } catch (err) {
           if (err.code === 'CREDIT_LIMIT') {
             creditLimitWarning(err.details || {}, async () => {
               try {
-                const res = await submitSale(method, paidBase, true, cur.code, paidForeign, items);
+                const res = await send(true);
                 close();
                 await afterSale(res);
               } catch (e2) { toast(e2.message, 'error'); }
@@ -649,7 +727,7 @@ function openPaymentModal(t) {
   });
 }
 
-function submitSale(method, paid, force, currencyCode, paidOriginal, itemsOverride) {
+function submitSale(method, paid, force, currencyCode, paidOriginal, itemsOverride, payments) {
   return api('POST', '/api/sales', {
     items: itemsOverride || state.cart.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_price: i.unit_price, discount: i.discount })),
     customer_id: state.cartMeta.customer_id || null,
@@ -661,6 +739,7 @@ function submitSale(method, paid, force, currencyCode, paidOriginal, itemsOverri
     discount: Number(state.cartMeta.discount) || 0,
     tax: taxMode() === 'manual' ? Number(state.cartMeta.tax) || 0 : null,
     shift_id: state.shift ? state.shift.id : null,
+    ...(payments ? { payments } : {}),
     ...(force ? { force_credit_limit: true } : {}),
   });
 }

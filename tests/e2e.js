@@ -804,8 +804,124 @@ const { readZip } = require('../src/server/core/zip');
   r = await call('POST', '/api/vouchers/999999/repeat', null, token);
   ok('repeat missing voucher (404)', r.status === 404, String(r.status));
 
+  r = await call('POST', '/api/shifts/open', { opening_balance: 0 }, token);
+  ok('shift opened for split tests', r.status === 201, String(r.status));
+  const splitShiftId = r.data.shift.id;
+
+  r = await call('POST', '/api/products', { name: 'صنف دفع مختلط', category: 'اختبار', barcode: 'MIX1', sale_price: 500000, cost_price: 300000, quantity: 30, reorder_level: 1 }, token);
+  const mixPid = r.data.product.id;
+  ok('product for split payment created', r.status === 201, String(r.status));
+
+  r = await call('POST', '/api/sales', {
+    items: [{ product_id: mixPid, qty: 2, unit_price: 500000 }],
+    payment_method: 'mixed', paid: 1100000, shift_id: splitShiftId,
+    payments: [{ method: 'cash', amount: 700000 }, { method: 'card', amount: 400000 }],
+  }, token);
+  const splitId = r.data.invoice && r.data.invoice.id;
+  ok('split payment sale created', r.status === 201 && r.data.invoice.payment_method === 'mixed', JSON.stringify({ status: r.status, method: r.data.invoice && r.data.invoice.payment_method }));
+  ok('split payment fully settled', Number(r.data.invoice.paid) === 1000000 && Number(r.data.invoice.due) === 0, JSON.stringify({ paid: r.data.invoice && r.data.invoice.paid, due: r.data.invoice && r.data.invoice.due }));
+
+  r = await call('GET', `/api/sales/${splitId}`, null, token);
+  const splitPayments = r.data.payments || [];
+  ok('split payment rows stored', splitPayments.length === 2 && splitPayments.some((p) => p.method === 'cash') && splitPayments.some((p) => p.method === 'card'), JSON.stringify(splitPayments.map((p) => ({ m: p.method, a: p.amount }))));
+  ok('split change trimmed from cash', splitPayments.find((p) => p.method === 'cash').amount === 600000 && splitPayments.find((p) => p.method === 'card').amount === 400000, JSON.stringify(splitPayments.map((p) => ({ m: p.method, a: p.amount }))));
+
+  r = await call('GET', '/api/treasury?page_size=10', null, token);
+  const saleCash = r.data.rows.find((x) => x.source === 'sale_cash' && Number(x.amount) === 600000);
+  const saleCard = r.data.rows.find((x) => x.source === 'sale_card' && Number(x.amount) === 400000);
+  ok('split treasury cash row', !!saleCash, JSON.stringify(r.data.rows.slice(0, 3).map((x) => ({ s: x.source, a: x.amount }))));
+  ok('split treasury card row', !!saleCard, JSON.stringify(r.data.rows.slice(0, 3).map((x) => ({ s: x.source, a: x.amount }))));
+
+  r = await call('GET', `/api/shifts/${splitShiftId}`, null, token);
+  ok('shift wallet/card totals updated', Number(r.data.shift.total_card) === 400000 && Number(r.data.shift.total_cash) === 600000, JSON.stringify({ cash: r.data.shift.total_cash, card: r.data.shift.total_card, wallet: r.data.shift.total_wallet }));
+
+  r = await call('POST', '/api/sales', {
+    items: [{ product_id: mixPid, qty: 1, unit_price: 500000 }],
+    payment_method: 'mixed', shift_id: splitShiftId,
+    payments: [{ method: 'wallet', amount: 500000 }],
+  }, token);
+  const walletSaleId = r.data.invoice && r.data.invoice.id;
+  ok('wallet payment sale', r.status === 201 && r.data.invoice.payment_method === 'wallet', JSON.stringify({ status: r.status, method: r.data.invoice && r.data.invoice.payment_method }));
+  r = await call('GET', `/api/shifts/${splitShiftId}`, null, token);
+  ok('shift wallet total updated', Number(r.data.shift.total_wallet) === 500000, String(r.data.shift.total_wallet));
+
+  r = await call('GET', '/api/reports/z-report', null, token);
+  ok('z-report exposes wallet total', Number(r.data.sales.wallet) === 500000, JSON.stringify(r.data.sales));
+  r = await call('GET', '/api/print/z-report', null, token);
+  ok('z-report print shows wallet', r.status === 200 && String(r.data).includes('مبيعات محفظة'), String(r.status));
+
+  r = await call('POST', '/api/sales', {
+    items: [{ product_id: mixPid, qty: 1, unit_price: 500000 }],
+    payment_method: 'mixed', shift_id: splitShiftId,
+    payments: [{ method: 'cash', amount: -100 }, { method: 'card', amount: 500100 }],
+  }, token);
+  ok('split negative amount rejected (400)', r.status === 400, String(r.status));
+
+  r = await call('POST', '/api/sales', {
+    items: [{ product_id: mixPid, qty: 1, unit_price: 500000 }],
+    payment_method: 'mixed', shift_id: splitShiftId,
+    payments: [{ method: 'bitcoin', amount: 500000 }],
+  }, token);
+  ok('split unknown method rejected (400)', r.status === 400, String(r.status));
+
+  r = await call('POST', '/api/sales', {
+    items: [{ product_id: mixPid, qty: 1, unit_price: 500000 }],
+    payment_method: 'mixed', shift_id: splitShiftId,
+    payments: [{ method: 'cash', amount: 200000 }],
+  }, token);
+  ok('split partial without customer rejected (400)', r.status === 400 && String(r.data.error).includes('عميل'), JSON.stringify({ status: r.status, error: r.data && r.data.error }));
+
+  r = await call('POST', '/api/sales', {
+    items: [{ product_id: mixPid, qty: 1, unit_price: 500000 }],
+    payment_method: 'mixed', shift_id: splitShiftId, currency: 'USD',
+    payments: [{ method: 'cash', amount: 500000 }],
+  }, token);
+  ok('split with foreign currency rejected (400)', r.status === 400, String(r.status));
+
+  r = await call('POST', '/api/products', { name: 'صنف مرتجع تالف', category: 'اختبار', barcode: 'DMG1', sale_price: 2000, cost_price: 1000, quantity: 5, reorder_level: 1 }, token);
+  const dmgPid = r.data.product.id;
+  r = await call('POST', '/api/sales', {
+    items: [{ product_id: dmgPid, qty: 2, unit_price: 2000 }],
+    payment_method: 'cash', paid: 4000, shift_id: splitShiftId,
+  }, token);
+  const dmgSaleId = r.data.invoice.id;
+  const dmgItemId = (await call('GET', `/api/sales/${dmgSaleId}`, null, token)).data.items[0].id;
+  const dmgStockBefore = Number((await call('GET', `/api/products/${dmgPid}`, null, token)).data.product.quantity);
+  r = await call('POST', `/api/sales/${dmgSaleId}/return`, { items: [{ item_id: dmgItemId, qty: 2, damaged: true }] }, token);
+  ok('damaged return created', r.status === 201 && String(r.data.invoice.notes).includes('تالف'), JSON.stringify({ status: r.status, notes: r.data.invoice && r.data.invoice.notes }));
+  const dmgStockAfter = Number((await call('GET', `/api/products/${dmgPid}`, null, token)).data.product.quantity);
+  ok('damaged return keeps stock unchanged', dmgStockBefore === dmgStockAfter, `${dmgStockBefore} -> ${dmgStockAfter}`);
+  const dmgMoves = (await call('GET', `/api/products/${dmgPid}/movements`, null, token)).data.movements;
+  ok('damaged return logs damage movement', dmgMoves.some((m) => m.direction === 'damage'), JSON.stringify(dmgMoves.slice(0, 3).map((m) => m.direction)));
+
+  r = await call('POST', '/api/sales', {
+    items: [{ product_id: dmgPid, qty: 1, unit_price: 2000 }],
+    payment_method: 'cash', paid: 2000, shift_id: splitShiftId,
+  }, token);
+  const goodSaleId = r.data.invoice.id;
+  const goodItemId = (await call('GET', `/api/sales/${goodSaleId}`, null, token)).data.items[0].id;
+  const goodStockBefore = Number((await call('GET', `/api/products/${dmgPid}`, null, token)).data.product.quantity);
+  r = await call('POST', `/api/sales/${goodSaleId}/return`, { items: [{ item_id: goodItemId, qty: 1 }] }, token);
+  const goodStockAfter = Number((await call('GET', `/api/products/${dmgPid}`, null, token)).data.product.quantity);
+  ok('sound return restocks product', goodStockAfter - goodStockBefore === 1, `${goodStockBefore} -> ${goodStockAfter}`);
+
+  r = await call('POST', '/api/sales', {
+    items: [{ product_id: dmgPid, qty: 1, unit_price: 2000 }],
+    payment_method: 'card', paid: 2000, shift_id: splitShiftId,
+  }, token);
+  const cardSaleId = r.data.invoice.id;
+  const cardItemId = (await call('GET', `/api/sales/${cardSaleId}`, null, token)).data.items[0].id;
+  r = await call('POST', `/api/sales/${cardSaleId}/return`, { items: [{ item_id: cardItemId, qty: 1 }] }, token);
+  ok('return refunds by original method', r.status === 201 && r.data.invoice.payment_method === 'card', JSON.stringify({ status: r.status, method: r.data.invoice && r.data.invoice.payment_method }));
+  r = await call('GET', '/api/treasury?page_size=10', null, token);
+  ok('return card treasury row', r.data.rows.some((x) => x.source === 'return_card' && Number(x.amount) === 2000), JSON.stringify(r.data.rows.slice(0, 3).map((x) => ({ s: x.source, a: x.amount }))));
+
+  r = await call('POST', `/api/shifts/${splitShiftId}/close`, {}, token);
+  ok('shift closed after split tests', r.status === 200 && r.data.shift.status === 'closed', String(r.status));
+
   r = await call('GET', '/api/reports/trial-balance', null, token);
   ok('trial balance balanced after repeats', Math.abs(r.data.totals.debit - r.data.totals.credit) < 0.01, `${r.data.totals.debit} / ${r.data.totals.credit}`);
+
 
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

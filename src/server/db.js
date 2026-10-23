@@ -58,6 +58,8 @@ function migrate() {
   ensure('vouchers', 'currency', 'currency TEXT');
   ensure('vouchers', 'exchange_rate', 'exchange_rate REAL NOT NULL DEFAULT 1');
   ensure('vouchers', 'amount_original', 'amount_original REAL');
+  ensure('invoices', 'payments', 'payments TEXT');
+  ensure('shifts', 'total_wallet', 'total_wallet REAL NOT NULL DEFAULT 0');
 }
 
 function bootstrap() {

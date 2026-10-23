@@ -65,9 +65,15 @@ function buildIncomeStatement(query = {}) {
   const netProfit = grossProfit - totalExpenses + Number(otherIncome.total);
   const salesCount = Number(sales.count) || 0;
 
+  const payRange = range.replace(/created_at/g, 'i.created_at');
   const byPayment = db.all(
-    `SELECT payment_method, COALESCE(SUM(total),0) AS total, COUNT(*) AS count FROM invoices
-     WHERE type='sale' AND ${range} GROUP BY payment_method`, params
+    `SELECT method AS payment_method, COALESCE(SUM(amount),0) AS total, COUNT(*) AS count FROM (
+       SELECT ip.method AS method, ip.amount AS amount FROM invoice_payments ip
+       JOIN invoices i ON i.id = ip.invoice_id WHERE i.type='sale' AND ${payRange}
+       UNION ALL
+       SELECT i.payment_method AS method, i.paid AS amount FROM invoices i
+       WHERE i.type='sale' AND i.paid > 0 AND NOT EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_id = i.id) AND ${payRange}
+     ) GROUP BY method`, [...params, ...params]
   );
   const daily = db.all(
     `SELECT date(created_at) AS day, COALESCE(SUM(total),0) AS total, COUNT(*) AS count
@@ -462,8 +468,14 @@ module.exports = {
          FROM invoices WHERE type='sale' AND ${range} GROUP BY day ORDER BY day`, params
       );
       const byPayment = db.all(
-        `SELECT payment_method, COALESCE(SUM(total),0) AS total FROM invoices WHERE type='sale' AND ${range} GROUP BY payment_method`,
-        params
+        `SELECT method AS payment_method, COALESCE(SUM(amount),0) AS total FROM (
+           SELECT ip.method AS method, ip.amount AS amount FROM invoice_payments ip
+           JOIN invoices i ON i.id = ip.invoice_id WHERE i.type='sale' AND ${range.replace(/created_at/g, 'i.created_at')}
+           UNION ALL
+           SELECT i.payment_method AS method, i.paid AS amount FROM invoices i
+           WHERE i.type='sale' AND i.paid > 0 AND NOT EXISTS (SELECT 1 FROM invoice_payments p WHERE p.invoice_id = i.id) AND ${range.replace(/created_at/g, 'i.created_at')}
+         ) GROUP BY method`,
+        [...params, ...params]
       );
       sendJson(ctx.res, 200, {
         sales: sales.total, sales_count: sales.count, returns: returns.total, purchases: purchases.total,
