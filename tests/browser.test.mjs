@@ -148,6 +148,8 @@ async function main() {
   const customerId = seedCustomer;
   const lowStockId = await evalJs(`fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({name:'صنف ناقص المخزون',category:'اختبار',barcode:'UILOW1',sale_price:900,cost_price:500,quantity:2,reorder_level:5})}).then(r=>r.json()).then(d=>d.product.id)`, true);
   check('seed low stock product created', typeof lowStockId === 'number' && lowStockId > 0, String(lowStockId));
+  const scalePid = await evalJs(`fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({name:'صنف ميزان',category:'اختبار',barcode:'9011',sale_price:6000,cost_price:4000,quantity:50,reorder_level:1})}).then(r=>r.json()).then(d=>d.product.id)`, true);
+  check('seed scale product created', typeof scalePid === 'number' && scalePid > 0, String(scalePid));
 
   phase = 'shell';
   await nav(BASE);
@@ -246,19 +248,19 @@ async function main() {
   const repeatQty = await evalJs(`(function(){const el=document.querySelector('#cartItems [data-qty]');return el?Number(el.value):0;})()`);
   check('F5 repeats last invoice', repeatRows > 0 && repeatQty >= 1, 'rows=' + repeatRows + ' qty=' + repeatQty);
   await evalJs(`document.getElementById('clearCart').click()`);
-  await sleep(500);
+  await waitFor(`!!document.querySelector('.modal-backdrop [data-yes]')`, 20);
   await evalJs(`document.querySelector('.modal-backdrop [data-yes]').click()`);
   await sleep(400);
 
   phase = 'credit-limit';
-  await evalJs(`location.hash = '#/pos'`);
-  await sleep(1200);
+  await hardNav('#/pos');
+  await waitFor(`!!document.getElementById('posCustomer')`, 40);
   await evalJs(`(function(){const s=document.getElementById('posCustomer');s.value='${customerId}';s.dispatchEvent(new Event('change'));})()`);
   await waitFor(`!!document.querySelector('#productGrid [data-id]')`, 40);
   await evalJs(`document.querySelector('#productGrid [data-id]').click()`);
   await sleep(400);
   await evalJs(`document.getElementById('payBtn').click()`);
-  await sleep(500);
+  await waitFor(`!!document.querySelector('.pm-btn[data-pm="credit"]')`, 40);
   await evalJs(`document.querySelector('.pm-btn[data-pm="credit"]').click()`);
   await sleep(200);
   await evalJs(`document.querySelector('#confirmPay').click()`);
@@ -350,8 +352,7 @@ async function main() {
   await sleep(300);
 
   phase = 'pos-split';
-  await evalJs(`location.hash = '#/pos'`);
-  await sleep(1600);
+  await hardNav('#/pos');
   await waitFor(`!!document.querySelector('#productGrid [data-id]')`, 40);
   await evalJs(`document.querySelector('#productGrid [data-id]').click()`);
   await sleep(400);
@@ -375,15 +376,18 @@ async function main() {
   check('split sale stores two payment rows', splitDetail === 'card,cash', 'rows=' + splitDetail);
 
   phase = 'sales-payments';
-  await evalJs(`location.hash = '#/sales'`);
-  await sleep(1600);
+  await hardNav('#/sales');
+  await sleep(600);
   await waitFor(`!!document.querySelector('[data-view]')`, 40);
-  await evalJs(`document.querySelector('[data-view]').click()`);
-  await sleep(700);
-  const viewText = await evalJs(`(function(){const p=document.querySelector('.modal-panel');return p?p.innerText:'';})()`);
+  await evalJs(`(function(){const rows=[...document.querySelectorAll('#sBody tr')];const r=rows.find(x=>/مختلط/.test(x.innerText))||rows[0];const b=r?r.querySelector('[data-view]'):null;if(b)b.click();})()`);
+  await sleep(900);
+  const viewText = await evalJs(`(function(){const p=[...document.querySelectorAll('.modal-panel')].pop();return p?p.innerText:'';})()`);
   check('invoice modal shows payment breakdown', /مدفوع نقدي/.test(viewText) && /مدفوع بطاقة/.test(viewText), viewText.replace(/\n/g, ' ').slice(0, 90));
-  await evalJs(`(function(){const b=document.querySelector('.modal-panel [data-close]');if(b)b.click();})()`);
+  await evalJs(`(function(){const ps=[...document.querySelectorAll('.modal-panel')];const b=ps.length?ps[ps.length-1].querySelector('[data-close]'):null;if(b)b.click();})()`);
   await sleep(400);
+  await waitFor(`!!document.querySelector('[data-ret]')`, 40);
+  const returnBtnCount = await evalJs(`document.querySelectorAll('[data-ret]').length`);
+  check('sales list has returnable invoices', returnBtnCount > 0, 'count=' + returnBtnCount);
 
   phase = 'damaged-return-ui';
   await evalJs(`document.querySelector('[data-ret]').click()`);
@@ -397,6 +401,25 @@ async function main() {
   await sleep(1800);
   const lastReturn = await evalJs(`fetch('/api/sales?type=return_sale&page_size=1',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows[0])`, true);
   check('damaged return saved from UI', !!lastReturn && String(lastReturn.notes).includes('تالف'), JSON.stringify(lastReturn && lastReturn.notes));
+
+  phase = 'scale-barcode';
+  await evalJs(`fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({scale_enabled:1,scale_mode:'weight',scale_prefix:'2',scale_plu_len:5,scale_value_len:5,scale_value_decimals:3})})`, true);
+  await hardNav('#/pos');
+  await waitFor(`!!document.getElementById('posSearch')`, 40);
+  await sleep(600);
+  await evalJs(`(function(){const b=document.getElementById('clearCart');if(b){b.click();}})()`);
+  await sleep(400);
+  await evalJs(`(function(){var b=document.querySelector('.modal-backdrop [data-yes]');if(b){b.click();}})()`);
+  await sleep(400);
+  await evalJs(`(function(){const i=document.getElementById('posSearch');i.value='209011015007';i.focus();i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));})()`);
+  await sleep(1200);
+  const scaleCartQty = await evalJs(`(function(){const el=document.querySelector('#cartItems [data-qty]');return el?Number(el.value):0;})()`);
+  const scaleCartStep = await evalJs(`(function(){const el=document.querySelector('#cartItems [data-qty]');return el?el.step:'';})()`);
+  check('scale scan adds weighted cart line', scaleCartQty > 0 && scaleCartQty < 10, 'qty=' + scaleCartQty);
+  check('scale cart line uses fractional step', scaleCartStep === '0.001', 'step=' + scaleCartStep);
+  const scaleResult = await evalJs(`fetch('/api/products/barcode/209011015007',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>({id:d.product&&d.product.id,barcode:d.product&&d.product.barcode}))`, true);
+  check('scale barcode resolves from UI', scaleResult && Number(scaleResult.id) === Number(scalePid), JSON.stringify(scaleResult));
+  await evalJs(`fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${token}'},body:JSON.stringify({scale_enabled:0})})`, true);
 
   await evalJs(`location.hash = '#/admin'`);
   await waitFor(`!!document.getElementById('backupCard')`);
@@ -661,7 +684,7 @@ async function main() {
   const actCount = await evalJs(`document.getElementById('acCount').textContent`);
   check('activity view shows total count', /إجمالي/.test(actCount), actCount);
   await evalJs(`(function(){const s=document.getElementById('acAction');s.value='sale';s.dispatchEvent(new Event('change'));})()`);
-  await sleep(900);
+  await waitFor(`(function(){const rows=[...document.querySelectorAll('#acRows tr')];return rows.length>0 && rows.every(function(r){return /بيع/.test(r.innerText);});})()`, 40);
   const saleOnly = await evalJs(`(function(){const rows=[...document.querySelectorAll('#acRows tr')];return rows.length?rows.every(function(r){return /بيع/.test(r.innerText);}):true;})()`);
   check('activity view filters by action', saleOnly === true, 'rows=' + actRows);
   const actApi = await evalJs(`fetch('/api/activity',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>({t:d.total,a:d.by_action.length}))`, true);
@@ -717,8 +740,10 @@ async function main() {
   await evalJs(`location.hash = '#/dashboard'`);
   await sleep(700);
   await evalJs(`location.hash = '#/products'`);
-  await sleep(1800);
-  await waitFor(`document.querySelectorAll('#pBody img').length > 0`, 40);
+  await waitFor(`!!document.getElementById('pBody')`, 40);
+  await sleep(800);
+  await evalJs(`(function(){const s=document.getElementById('pSearch');if(s&&s.value){s.value='';s.dispatchEvent(new Event('input'));}})()`);
+  await waitFor(`document.querySelectorAll('#pBody img').length > 0`, 60);
   const invImg = await evalJs(`document.querySelectorAll('#pBody img').length`);
   check('inventory list shows product image', invImg >= 1, 'imgs=' + invImg);
   await evalJs(`location.hash = '#/pos'`);
@@ -765,10 +790,10 @@ async function main() {
   await sleep(1800);
   await waitFor(`!!document.querySelector('#pBody [data-edit="${productId}"]')`, 40);
   await evalJs(`(function(){const b=document.querySelector('#pBody [data-edit="${productId}"]');if(b)b.click();})()`);
-  await sleep(1000);
+  await waitFor(`!!document.querySelector('[data-pcur="USD"]')`, 40);
   const priceForm = await evalJs(`(function(){const el=document.querySelector('[data-pcur="USD"]');return el?el.value:'';})()`);
   check('product form loads foreign price', Number(priceForm) === 12.5, 'value=' + priceForm);
-  await evalJs(`(function(){const el=document.querySelector('[data-pcur="USD"]');el.value='15.5';el.dispatchEvent(new Event('input'));})()`);
+  await evalJs(`(function(){const el=document.querySelector('[data-pcur="USD"]');if(el){el.value='15.5';el.dispatchEvent(new Event('input'));}})()`);
   await evalJs(`document.getElementById('prodSave').click()`);
   await sleep(1800);
   const savedPrice = await evalJs(`fetch('/api/products/${productId}/prices',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>{const x=d.rows.find(r=>r.currency==='USD');return x?x.sale_price:0;})`, true);

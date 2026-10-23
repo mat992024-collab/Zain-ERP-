@@ -40,6 +40,9 @@ module.exports = {
             if (key === 'tax_mode' && !['manual', 'auto', 'inclusive'].includes(String(value))) {
               throw new HttpError(400, 'طريقة احتساب الضريبة غير صحيحة');
             }
+            if (key === 'scale_mode' && !['weight', 'price'].includes(String(value))) {
+              throw new HttpError(400, 'وضع باركود الميزان غير صحيح');
+            }
             if (typeof value === 'string' && value.length > 600000) throw new HttpError(400, `قيمة الإعداد ${key} كبيرة جداً`);
             const existing = db.get('SELECT category FROM settings WHERE key = ?', [key]);
             db.setSetting(key, value, existing ? existing.category : 'general');

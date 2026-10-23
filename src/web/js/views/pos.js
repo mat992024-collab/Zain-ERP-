@@ -262,11 +262,66 @@ function renderGrid(term) {
 }
 
 export function addByCode(code) {
+  const scale = parseScaleCode(code);
+  if (scale) {
+    const p = findScaleProduct(scale);
+    if (p) { addScaleProduct(p, scale); return; }
+    api('GET', `/api/products/barcode/${encodeURIComponent(code)}`)
+      .then((r) => { products.unshift(r.product); addScaleProduct(r.product, scale); })
+      .catch(() => toast('لم يتم العثور على صنف باركود الميزان', 'error'));
+    return;
+  }
   const p = products.find((x) => String(x.barcode) === String(code) || String(x.part_number) === String(code));
   if (p) { addProduct(p); toast(`أضيف: ${p.name}`, 'success'); return; }
   api('GET', `/api/products/barcode/${encodeURIComponent(code)}`)
     .then((r) => { products.unshift(r.product); addProduct(r.product); toast(`أضيف: ${r.product.name}`, 'success'); })
     .catch(() => toast('لم يتم العثور على الصنف', 'error'));
+}
+
+function parseScaleCode(code) {
+  const s = state.settings || {};
+  if (String(s.scale_enabled) !== '1') return null;
+  const prefix = String(s.scale_prefix || '');
+  const raw = String(code || '');
+  if (!prefix || !raw.startsWith(prefix)) return null;
+  const pluLen = Math.max(Number(s.scale_plu_len) || 5, 1);
+  const valLen = Math.max(Number(s.scale_value_len) || 5, 1);
+  const rest = raw.slice(prefix.length);
+  if (rest.length < pluLen + valLen) return null;
+  const plu = rest.slice(0, pluLen);
+  const valueRaw = rest.slice(pluLen, pluLen + valLen);
+  if (!/^\d+$/.test(plu) || !/^\d+$/.test(valueRaw)) return null;
+  const decimals = Math.max(Number(s.scale_value_decimals) || 0, 0);
+  return {
+    plu,
+    value: Number(valueRaw) / 10 ** decimals,
+    mode: s.scale_mode === 'price' ? 'price' : 'weight',
+  };
+}
+
+function findScaleProduct(scale) {
+  const key = String(scale.plu).replace(/^0+/, '');
+  return products.find((x) => [x.barcode, x.part_number, x.id]
+    .some((v) => v !== null && v !== undefined && String(v).replace(/^0+/, '') === key));
+}
+
+function addScaleProduct(p, scale) {
+  if (!(scale.value > 0)) { toast('قيمة غير صالحة في باركود الميزان', 'error'); return; }
+  const stock = Number(p.quantity);
+  if (scale.mode === 'weight') {
+    const existing = state.cart.find((i) => i.product_id === p.id && i.scale === true);
+    const nextQty = roundTo((existing ? existing.qty : 0) + scale.value, 3);
+    if (Number.isFinite(stock) && nextQty > stock) {
+      toast(`الكمية المتاحة من ${p.name} هي ${stock}`, 'error');
+      return;
+    }
+    if (existing) existing.qty = nextQty;
+    else state.cart.push({ product_id: p.id, name: p.name, unit: p.unit, qty: scale.value, unit_price: priceFor(p), cost_price: p.cost_price, discount: 0, tax_rate: Number(p.tax_rate) || 0, stock, scale: true });
+  } else {
+    state.cart.push({ product_id: p.id, name: p.name, unit: p.unit, qty: 1, unit_price: roundTo(scale.value, 2), cost_price: p.cost_price, discount: 0, tax_rate: Number(p.tax_rate) || 0, stock, scale: true });
+  }
+  renderCart();
+  toast(`أضيف: ${p.name} — ${scale.mode === 'weight' ? roundTo(scale.value, 3) : money(scale.value)}`, 'success');
 }
 
 function priceFor(p) {
@@ -331,18 +386,18 @@ function renderCart() {
         </div>
         <div class="flex items-center gap-1">
           <button data-minus="${idx}" class="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold">-</button>
-          <input type="number" value="${i.qty}" data-qty="${idx}" class="field !py-1 !px-1 !w-14 text-center text-sm" />
+          <input type="number" value="${i.qty}" data-qty="${idx}" step="${i.scale ? '0.001' : '1'}" class="field !py-1 !px-1 !w-14 text-center text-sm" />
           <button data-plus="${idx}" class="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold">+</button>
         </div>
         <div class="w-24 text-left font-black text-sm text-zain-700">${money(i.qty * i.unit_price - i.discount)}</div>
         <button data-del="${idx}" class="text-rose-400 hover:text-rose-600"><i class="bi bi-x-lg"></i></button>
       </div>`)
     .join('');
-  box.querySelectorAll('[data-qty]').forEach((el) => el.addEventListener('change', (e) => { state.cart[+e.target.dataset.qty].qty = Math.max(1, Number(e.target.value) || 1); renderCart(); }));
+  box.querySelectorAll('[data-qty]').forEach((el) => el.addEventListener('change', (e) => { const it = state.cart[+e.target.dataset.qty]; const min = it.scale ? 0.001 : 1; it.qty = Math.max(min, Number(e.target.value) || min); renderCart(); }));
   box.querySelectorAll('[data-price]').forEach((el) => el.addEventListener('change', (e) => { state.cart[+e.target.dataset.price].unit_price = Number(e.target.value) || 0; renderCart(); }));
   box.querySelectorAll('[data-disc]').forEach((el) => el.addEventListener('change', (e) => { state.cart[+e.target.dataset.disc].discount = Number(e.target.value) || 0; renderCart(); }));
-  box.querySelectorAll('[data-plus]').forEach((el) => el.addEventListener('click', () => { state.cart[+el.dataset.plus].qty += 1; renderCart(); }));
-  box.querySelectorAll('[data-minus]').forEach((el) => el.addEventListener('click', () => { const i = state.cart[+el.dataset.minus]; i.qty = Math.max(1, i.qty - 1); renderCart(); }));
+  box.querySelectorAll('[data-plus]').forEach((el) => el.addEventListener('click', () => { const it = state.cart[+el.dataset.plus]; if (it.scale) it.qty = roundTo(it.qty + 0.1, 3); else it.qty += 1; renderCart(); }));
+  box.querySelectorAll('[data-minus]').forEach((el) => el.addEventListener('click', () => { const it = state.cart[+el.dataset.minus]; if (it.scale) it.qty = Math.max(0.001, roundTo(it.qty - 0.1, 3)); else it.qty = Math.max(1, it.qty - 1); renderCart(); }));
   box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', () => { state.cart.splice(+el.dataset.del, 1); renderCart(); }));
   updateTotals();
 }

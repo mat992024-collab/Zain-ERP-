@@ -57,9 +57,9 @@
 ## الاختبارات
 ```
 npm test              # يشغّل الثلاث مجموعات بالترتيب
-npm run test:api      # اختبارات الـ API (345 فحصاً)
+npm run test:api      # اختبارات الـ API (352 فحصاً)
 npm run test:render   # رسم كل الشاشات في بيئة DOM وهمية (14 فحصاً)
-npm run test:ui       # متصفح Chrome/Edge حقيقي عبر CDP (148 فحصاً)
+npm run test:ui       # متصفح Chrome/Edge حقيقي عبر CDP (153 فحصاً)
 ```
 - `test:api` يستخدم قاعدة بيانات منفصلة `data/test/e2e.db`
 - `test:render` و `test:ui` يستخدمان `data/test/render-test.db` و `data/test/ui-test.db`

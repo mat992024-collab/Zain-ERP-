@@ -411,6 +411,18 @@ export async function openSettings() {
         <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_shift_required" class="accent-zain-600" ${s.shift_required === '1' ? 'checked' : ''} /> إلزام فتح وردية للبيع</label>
         <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_ai_enabled" class="accent-zain-600" ${s.ai_enabled === '1' ? 'checked' : ''} /> تشغيل محرك الذكاء الاصطناعي</label>
         <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_low_stock_alert" class="accent-zain-600" ${s.low_stock_alert === '1' ? 'checked' : ''} /> تنبيهات المخزون المنخفض</label>
+
+        <div class="col-span-2 font-black text-zain-700 border-b border-slate-100 pb-2 mt-2">باركود الميزان</div>
+        <label class="flex items-center gap-2 text-sm col-span-2"><input type="checkbox" id="set_scale_enabled" class="accent-zain-600" ${s.scale_enabled === '1' ? 'checked' : ''} /> تفعيل قراءة باركود الميزان في نقاط البيع</label>
+        ${field('وضع الميزان', `<select id="set_scale_mode" class="field">
+          <option value="weight" ${s.scale_mode === 'weight' ? 'selected' : ''}>وزن (الكمية = القيمة)</option>
+          <option value="price" ${s.scale_mode === 'price' ? 'selected' : ''}>سعر (الإجمالي = القيمة)</option>
+        </select>`)}
+        ${field('بادئة الباركود', `<input id="set_scale_prefix" class="field" value="${esc(s.scale_prefix || '2')}" />`)}
+        ${field('طول رمز الصنف (PLU)', `<input id="set_scale_plu_len" type="number" min="1" max="10" class="field" value="${esc(s.scale_plu_len || '5')}" />`)}
+        ${field('طول قيمة الوزن/السعر', `<input id="set_scale_value_len" type="number" min="1" max="10" class="field" value="${esc(s.scale_value_len || '5')}" />`)}
+        ${field('الخانات العشرية للقيمة', `<input id="set_scale_value_decimals" type="number" min="0" max="4" class="field" value="${esc(s.scale_value_decimals || '3')}" />`)}
+        <div class="col-span-2 text-[11px] text-slate-500">مثال: البادئة 2 + 5 أرقام للرمز + 5 أرقام للوزن/السعر + رقم تحقق يُهمل. يُطابق الرمز مع باركود الصنف أو رقم القطعة أو معرّف الصنف.</div>
       </div>`,
     footer: canEdit ? `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="setSave" class="btn btn-primary"><i class="bi bi-check2-circle"></i> حفظ الإعدادات</button>` : `<button data-close class="btn btn-ghost">إغلاق</button>`,
     onMount(wrap, close) {
@@ -491,6 +503,12 @@ export async function openSettings() {
           shift_required: wrap.querySelector('#set_shift_required').checked ? 1 : 0,
           ai_enabled: wrap.querySelector('#set_ai_enabled').checked ? 1 : 0,
           low_stock_alert: wrap.querySelector('#set_low_stock_alert').checked ? 1 : 0,
+          scale_enabled: wrap.querySelector('#set_scale_enabled').checked ? 1 : 0,
+          scale_mode: wrap.querySelector('#set_scale_mode').value,
+          scale_prefix: wrap.querySelector('#set_scale_prefix').value,
+          scale_plu_len: wrap.querySelector('#set_scale_plu_len').value,
+          scale_value_len: wrap.querySelector('#set_scale_value_len').value,
+          scale_value_decimals: wrap.querySelector('#set_scale_value_decimals').value,
         };
         try {
           const res = await api('PUT', '/api/settings', payload);

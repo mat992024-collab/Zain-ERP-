@@ -922,6 +922,29 @@ const { readZip } = require('../src/server/core/zip');
   r = await call('GET', '/api/reports/trial-balance', null, token);
   ok('trial balance balanced after repeats', Math.abs(r.data.totals.debit - r.data.totals.credit) < 0.01, `${r.data.totals.debit} / ${r.data.totals.credit}`);
 
+  r = await call('POST', '/api/products', { name: 'صنف ميزان', category: 'اختبار', barcode: '9011', sale_price: 6000, cost_price: 4000, quantity: 50, reorder_level: 1 }, token);
+  const scalePid = r.data.product.id;
+  ok('scale product created with numeric barcode', r.status === 201 && Number(scalePid) > 0, String(scalePid));
+
+  const scaleBarcode = '209011015007';
+  r = await call('GET', `/api/products/barcode/${scaleBarcode}`, null, token);
+  ok('scale barcode resolves product (before enabled)', r.status === 404, String(r.status));
+
+  r = await call('PUT', '/api/settings', { scale_enabled: 1, scale_mode: 'weight', scale_prefix: '2', scale_plu_len: 5, scale_value_len: 5, scale_value_decimals: 3 }, token);
+  ok('scale settings saved', r.status === 200 && r.data.settings.scale_enabled === '1', JSON.stringify({ en: r.data.settings && r.data.settings.scale_enabled, mode: r.data.settings && r.data.settings.scale_mode }));
+
+  r = await call('GET', `/api/products/barcode/${scaleBarcode}`, null, token);
+  ok('scale barcode resolves PLU to product', r.status === 200 && Number(r.data.product.id) === Number(scalePid), JSON.stringify({ status: r.status, id: r.data.product && r.data.product.id }));
+
+  r = await call('GET', '/api/products/barcode/209011023339', null, token);
+  ok('scale barcode ignores zero padding', r.status === 200 && Number(r.data.product.id) === Number(scalePid), JSON.stringify({ status: r.status }));
+
+  r = await call('GET', '/api/products/barcode/29999912345x', null, token);
+  ok('scale barcode with unknown PLU returns 404', r.status === 404, String(r.status));
+  r = await call('PUT', '/api/settings', { scale_mode: 'invalid' }, token);
+  ok('invalid scale mode rejected (400)', r.status === 400, String(r.status));
+  await call('PUT', '/api/settings', { scale_enabled: 0 }, token);
+
 
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

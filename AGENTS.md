@@ -11,9 +11,9 @@ npm run build:css      # إلزامي بعد أي تعديل على src/web/styl
 npm start              # تشغيل + فتح Edge/Chrome في وضع --app
 npm run serve          # الخادم فقط (المنفذ 4180 أو ZAIN_PORT)
 npm test               # 3 مجموعات: API + رسم شاشات + متصفح حقيقي
-npm run test:api       # tests/e2e.js            (345 فحصاً)
+npm run test:api       # tests/e2e.js            (352 فحصاً)
 npm run test:render    # tests/render.test.mjs   (14 فحصاً)
-npm run test:ui        # tests/browser.test.mjs  (148 فحصاً)
+npm run test:ui        # tests/browser.test.mjs  (153 فحصاً)
 npm run seed           # بيانات تجريبية
 npm run reset          # تصفير القاعدة
 npm run doctor         # فحص البيئة والقاعدة والأجهزة (0 أخطاء = جاهز)

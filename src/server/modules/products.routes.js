@@ -93,7 +93,25 @@ module.exports = {
     });
 
     router.get('/api/products/barcode/:code', (ctx) => {
-      const product = db.get('SELECT * FROM products WHERE barcode = ? AND is_active = 1', [ctx.params.code]);
+      const code = String(ctx.params.code || '');
+      let product = db.get('SELECT * FROM products WHERE barcode = ? AND is_active = 1', [code]);
+      if (!product) {
+        const settings = db.getSettings();
+        if (settings.scale_enabled === '1' && settings.scale_prefix && code.startsWith(settings.scale_prefix)) {
+          const pluLen = Math.max(Number(settings.scale_plu_len) || 5, 1);
+          const valLen = Math.max(Number(settings.scale_value_len) || 5, 1);
+          const rest = code.slice(String(settings.scale_prefix).length);
+          if (rest.length >= pluLen + valLen) {
+            const plu = rest.slice(0, pluLen);
+            if (/^\d+$/.test(plu) && /^\d+$/.test(rest.slice(pluLen, pluLen + valLen))) {
+              const key = plu.replace(/^0+/, '') || '0';
+              product = db.all('SELECT * FROM products WHERE is_active = 1')
+                .find((p) => [p.barcode, p.part_number, p.id]
+                  .some((v) => v !== null && v !== undefined && String(v).replace(/^0+/, '') === key));
+            }
+          }
+        }
+      }
       if (!product) throw new HttpError(404, 'المنتج غير موجود');
       attachPrices(product);
       sendJson(ctx.res, 200, { product: parseJsonFields(product, ['units']) });
