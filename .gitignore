@@ -1,8 +1,8 @@
 node_modules/
 data/
-installer_output/
 installer/*.exe
-*.exe
+!installer_output/
+!installer_output/Zain_ERP_v1.0.0_Setup.exe
 *.log
 .DS_Store
 Thumbs.db
