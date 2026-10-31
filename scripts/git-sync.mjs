@@ -23,7 +23,7 @@ async function doSync() {
     const { stdout: remotes } = await execAsync('git remote');
     if (remotes.includes('origin')) {
       console.log(`[Auto-Sync] جاري الرفع إلى GitHub...`);
-      await execAsync('git push origin master');
+      await execAsync('git push origin main');
       console.log(`[Auto-Sync] تم الرفع والمزامنة مع GitHub بنجاح`);
     }
   } catch (err) {
