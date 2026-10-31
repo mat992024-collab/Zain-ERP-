@@ -32,6 +32,7 @@ const MODULES = [
   require('./modules/search.routes'),
   require('./modules/scheduled.routes'),
   require('./modules/sync.routes'),
+  require('./modules/license.routes'),
 ];
 
 function buildRouter() {

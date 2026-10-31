@@ -118,7 +118,10 @@ async function enterApp() {
   if (oBtn) oBtn.onclick = openOwnerReportsModal;
   const cBtn = document.getElementById('cloudSyncBtn');
   if (cBtn) cBtn.onclick = openCloudSyncModal;
+  const lBtn = document.getElementById('licenseBtn');
+  if (lBtn) lBtn.onclick = openLicenseModal;
   updateBranchBadge();
+  updateLicenseBadge();
   window.onhashchange = () => navigate(currentRoute());
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
@@ -207,8 +210,9 @@ function shiftAction() {
         wrap.querySelector('[data-cancel]').addEventListener('click', close);
         wrap.querySelector('#clSave').addEventListener('click', async () => {
           try {
-            await api('POST', `/api/shifts/${state.shift.id}/close`, { closing_balance: Number(wrap.querySelector('#clBalance').value), notes: wrap.querySelector('#clNotes').value });
+            const closeRes = await api('POST', `/api/shifts/${state.shift.id}/close`, { closing_balance: Number(wrap.querySelector('#clBalance').value), notes: wrap.querySelector('#clNotes').value });
             toast('تم إغلاق الوردية', 'success'); close(); await refreshShift();
+            if (closeRes && closeRes.whatsapp) openShiftWhatsAppModal(closeRes.whatsapp);
           } catch (e) { toast(e.message, 'error'); }
         });
       },
@@ -500,6 +504,155 @@ async function openCloudSyncModal() {
       });
     },
   });
+}
+
+function openShiftWhatsAppModal(wa) {
+  modal({
+    title: 'تقرير إغلاق الوردية والواتساب للمدير',
+    size: 'max-w-md',
+    body: `
+      <div class="space-y-3">
+        <div class="flex items-center gap-2 text-emerald-800 bg-emerald-50 p-3 rounded-xl border border-emerald-200">
+          <i class="bi bi-whatsapp text-2xl text-emerald-600"></i>
+          <div>
+            <div class="font-bold">تم إغلاق الوردية وتجهيز التقرير</div>
+            <div class="text-xs text-emerald-700">يمكنك إرسال التقرير التفصيلي لرقم المدير بالواتساب أو نسخه فوراً.</div>
+          </div>
+        </div>
+        <div class="field-group">
+          <label class="label">رقم هاتف المدير (واتساب):</label>
+          <input id="shiftMgrPhone" class="field text-left ltr" value="${esc(wa.phone || '')}" placeholder="01012345678" />
+        </div>
+        <div class="field-group">
+          <label class="label">تفاصيل التقرير المرسل:</label>
+          <textarea id="shiftWaText" class="field text-xs font-mono h-40 bg-slate-50" readonly>${esc(wa.text || '')}</textarea>
+        </div>
+      </div>
+    `,
+    footer: `
+      <div class="flex justify-between w-full">
+        <button id="shiftSendWa" class="btn btn-success flex items-center gap-1"><i class="bi bi-whatsapp"></i> إرسال لواتساب المدير</button>
+        <div class="flex gap-2">
+          <button id="shiftCopyWa" class="btn btn-ghost text-slate-700"><i class="bi bi-clipboard"></i> نسخ التقرير</button>
+          <button data-cancel class="btn btn-ghost">إغلاق</button>
+        </div>
+      </div>
+    `,
+    onMount(wModal, cModal) {
+      wModal.querySelector('[data-cancel]').addEventListener('click', cModal);
+      wModal.querySelector('#shiftCopyWa').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(wa.text);
+          toast('تم نسخ التقرير للحافظة', 'success');
+        } catch { toast('تعذر النسخ', 'error'); }
+      });
+      wModal.querySelector('#shiftSendWa').addEventListener('click', () => {
+        const p = wModal.querySelector('#shiftMgrPhone').value.trim();
+        let cleanP = p.replace(/[^0-9+]/g, '');
+        if (cleanP.startsWith('+')) cleanP = cleanP.substring(1);
+        if (/^01[0125]\d{8}$/.test(cleanP)) cleanP = '2' + cleanP;
+        const url = `https://wa.me/${cleanP}?text=${encodeURIComponent(wa.text)}`;
+        window.open(url, '_blank');
+      });
+    },
+  });
+}
+
+async function openLicenseModal() {
+  let status = { status: 'trial', days_left: 14, type_label: 'تجريبي', machine_id: 'ZAIN-...' };
+  try {
+    status = await api('GET', '/api/license/status');
+  } catch {}
+
+  const isExpired = status.status === 'expired';
+  const isActive = status.status === 'active';
+
+  modal({
+    title: 'ترخيص وتفعيل نظام زين ERP',
+    size: 'max-w-md',
+    body: `
+      <div class="space-y-4">
+        <div class="p-3 rounded-xl border ${isActive ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : isExpired ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-amber-50 border-amber-200 text-amber-900'}">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-sm">حالة الترخيص الحالية:</span>
+            <span class="badge ${isActive ? 'badge-ok' : isExpired ? 'badge-danger' : 'badge-warn'} font-bold">
+              ${isActive ? 'مفعّل بنجاح' : isExpired ? 'منتهي الصلاحية' : 'نسخة تجريبية'}
+            </span>
+          </div>
+          <div class="text-xs mt-2 space-y-1">
+            <div class="flex justify-between"><span>النوع:</span><b>${esc(status.type_label || 'تجريبي')}</b></div>
+            <div class="flex justify-between"><span>تاريخ الانتهاء:</span><b>${esc(status.expires_at || '-')}</b></div>
+            ${!isActive ? `<div class="flex justify-between"><span>الأيام المتبقية:</span><b>${status.days_left || 0} يوم</b></div>` : ''}
+          </div>
+        </div>
+
+        <div class="space-y-1">
+          <label class="label">معرّف هذا الجهاز (Machine ID):</label>
+          <div class="flex gap-2">
+            <input id="licMachId" class="field flex-1 font-mono text-center font-bold text-sky-700 bg-slate-50" value="${esc(status.machine_id || '')}" readonly />
+            <button id="licCopyMach" class="btn btn-ghost text-xs" title="نسخ المعرف"><i class="bi bi-clipboard"></i> نسخ</button>
+          </div>
+          <p class="text-xs text-slate-500">قم بإعطاء هذا المعرّف للإدارة أو مسؤول النظام لتوليد كود التفعيل المناسب لجهازك.</p>
+        </div>
+
+        <div class="space-y-1 pt-1 border-t border-slate-200">
+          <label class="label">رمز التفعيل (License Key):</label>
+          <input id="licKeyInput" class="field font-mono text-center uppercase tracking-wider text-xs" placeholder="ZACT-XXXX-XXXX-XXXX-M20261130-XXXXXXXX" />
+        </div>
+      </div>
+    `,
+    footer: `
+      <div class="flex justify-between w-full">
+        <button id="licActivateBtn" class="btn btn-primary flex items-center gap-1">
+          <i class="bi bi-shield-check"></i> تفعيل النظام
+        </button>
+        <button data-cancel class="btn btn-ghost">إلغاء</button>
+      </div>
+    `,
+    onMount(wrap, close) {
+      wrap.querySelector('[data-cancel]').addEventListener('click', close);
+      wrap.querySelector('#licCopyMach').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(status.machine_id);
+          toast('تم نسخ معرّف الجهاز إلى الحافظة', 'success');
+        } catch { toast('تعذر النسخ', 'error'); }
+      });
+      wrap.querySelector('#licActivateBtn').addEventListener('click', async () => {
+        const key = wrap.querySelector('#licKeyInput').value.trim();
+        if (!key) {
+          toast('يرجى إدخال رمز التفعيل أولاً', 'warning');
+          return;
+        }
+        try {
+          await api('POST', '/api/license/activate', { key });
+          toast('تم تفعيل النظام بنجاح!', 'success');
+          close();
+          await updateLicenseBadge();
+        } catch (e) {
+          toast(e.message, 'error');
+        }
+      });
+    },
+  });
+}
+
+async function updateLicenseBadge() {
+  const licText = document.getElementById('licenseText');
+  const licBtn = document.getElementById('licenseBtn');
+  if (!licBtn) return;
+  try {
+    const st = await api('GET', '/api/license/status');
+    if (st.status === 'active') {
+      if (licText) licText.textContent = `${st.type_label}`;
+      licBtn.className = 'btn btn-ghost !bg-emerald-50 !text-emerald-800 !border-emerald-200 text-xs font-bold';
+    } else if (st.status === 'trial') {
+      if (licText) licText.textContent = `تجريبي (${st.days_left}ي)`;
+      licBtn.className = 'btn btn-ghost !bg-amber-50 !text-amber-800 !border-amber-200 text-xs font-bold';
+    } else {
+      if (licText) licText.textContent = `انتهى الترخيص!`;
+      licBtn.className = 'btn btn-ghost !bg-rose-50 !text-rose-800 !border-rose-200 text-xs font-bold';
+    }
+  } catch {}
 }
 
 window.ZainApp = { navigate, enterApp, state };

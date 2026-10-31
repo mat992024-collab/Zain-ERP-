@@ -1046,7 +1046,73 @@ async function afterSale(res) {
   renderCart();
   renderGrid('');
   toast(`تم إنشاء الفاتورة ${res.invoice.invoice_no}`, 'success');
-  if (confirm('طباعة الفاتورة الآن؟')) openPrint(`/api/print/thermal/${invId}?width=${state.settings.printer_type === 'thermal58' ? 58 : 80}`);
+
+  const waData = res.whatsapp || {};
+  modal({
+    title: `فاتورة مبيعات ${res.invoice.invoice_no}`,
+    size: 'max-w-md',
+    body: `
+      <div class="text-center py-2 space-y-3">
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 mb-1">
+          <i class="bi bi-check-circle-fill text-3xl"></i>
+        </div>
+        <h4 class="text-lg font-bold text-slate-800">تم حفظ الفاتورة بنجاح</h4>
+        <p class="text-sm text-slate-500">الإجمالي النهائي: <b class="text-emerald-700 text-base">${money(res.invoice.total)}</b></p>
+
+        <div class="card p-3 bg-slate-50 border border-slate-200 text-right space-y-2 mt-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-700">إرسال تفاصيل الفاتورة للعميل عبر واتساب:</span>
+            <i class="bi bi-whatsapp text-emerald-600 text-lg"></i>
+          </div>
+          <div class="flex gap-2">
+            <input id="saleCustPhone" class="field flex-1 text-left ltr text-xs" placeholder="رقم هاتف العميل (مثال: 01012345678)" value="${esc(waData.phone || '')}" />
+            <button id="saleSendWa" class="btn btn-success text-xs flex items-center gap-1">
+              <i class="bi bi-whatsapp"></i> إرسال واتساب
+            </button>
+          </div>
+          <div class="flex justify-end gap-2 pt-1">
+            <button id="saleCopyWa" class="btn btn-ghost btn-sm text-xs text-slate-600 flex items-center gap-1">
+              <i class="bi bi-clipboard"></i> نسخ نص الفاتورة
+            </button>
+          </div>
+        </div>
+      </div>
+    `,
+    footer: `
+      <div class="flex justify-between w-full">
+        <button id="salePrintThermal" class="btn btn-primary flex items-center gap-1">
+          <i class="bi bi-printer"></i> طباعة إيصال
+        </button>
+        <button data-cancel class="btn btn-ghost">فاتورة جديدة (ESC)</button>
+      </div>
+    `,
+    onMount(wrap, close) {
+      wrap.querySelector('[data-cancel]').addEventListener('click', close);
+      wrap.querySelector('#salePrintThermal').addEventListener('click', () => {
+        openPrint(`/api/print/thermal/${invId}?width=${state.settings.printer_type === 'thermal58' ? 58 : 80}`);
+      });
+      wrap.querySelector('#saleCopyWa').addEventListener('click', async () => {
+        if (waData.text) {
+          try {
+            await navigator.clipboard.writeText(waData.text);
+            toast('تم نسخ تفاصيل الفاتورة إلى الحافظة', 'success');
+          } catch { toast('تعذر النسخ', 'error'); }
+        }
+      });
+      wrap.querySelector('#saleSendWa').addEventListener('click', () => {
+        const p = wrap.querySelector('#saleCustPhone').value.trim();
+        if (!p) {
+          toast('يرجى إدخال رقم هاتف العميل', 'warning');
+          return;
+        }
+        let cleanP = p.replace(/[^0-9+]/g, '');
+        if (cleanP.startsWith('+')) cleanP = cleanP.substring(1);
+        if (/^01[0125]\d{8}$/.test(cleanP)) cleanP = '2' + cleanP;
+        const url = `https://wa.me/${cleanP}?text=${encodeURIComponent(waData.text || '')}`;
+        window.open(url, '_blank');
+      });
+    },
+  });
 }
 
 function renderShiftBadge() {

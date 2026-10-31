@@ -960,6 +960,24 @@ const { readZip } = require('../src/server/core/zip');
   r = await call('GET', '/api/sync/queue', null, token);
   ok('cloud sync queue listed', r.status === 200 && Array.isArray(r.data.rows), String(r.status));
 
+  r = await call('GET', '/api/license/status', null, token);
+  ok('license status exposes machine_id', r.status === 200 && typeof r.data.machine_id === 'string', String(r.status));
+
+  r = await call('POST', '/api/license/activate', { key: 'ZACT-INVALID-KEY' }, token);
+  ok('invalid license rejected (400)', r.status === 400, String(r.status));
+
+  const licModule = require('../src/server/core/license');
+  const thisMachId = licModule.getMachineId();
+  const testLicKey = licModule.generateLicenseKey(thisMachId, 'yearly');
+  r = await call('POST', '/api/license/activate', { key: testLicKey }, token);
+  ok('valid license key activated', r.status === 200 && r.data.ok === true && r.data.license.type === 'yearly', String(r.status));
+
+  r = await call('GET', '/api/shifts/1/whatsapp', null, token);
+  ok('shift whatsapp endpoint returns report', r.status === 200 && typeof r.data.text === 'string' && r.data.text.includes('تقرير إغلاق الوردية'), String(r.status));
+
+  r = await call('GET', '/api/sales/1/whatsapp?phone=01012345678', null, token);
+  ok('sales whatsapp endpoint returns invoice', r.status === 200 && typeof r.data.text === 'string' && r.data.url.includes('wa.me/201012345678'), String(r.status));
+
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

@@ -519,6 +519,14 @@ const DEFAULT_SETTINGS = [
   ["cloud_sync_interval", "30", "integration"],
   ["cloud_sync_last_run", "", "integration"],
   ["cloud_sync_status", "idle", "integration"],
+  ["manager_whatsapp_phone", "01000000000", "integration"],
+  ["whatsapp_auto_send_shift", "1", "integration"],
+  ["whatsapp_auto_send_invoice", "1", "integration"],
+  ["license_key", "", "general"],
+  ["license_type", "trial", "general"],
+  ["license_expires_at", "", "general"],
+  ["license_installed_at", "", "general"],
+  ["license_registered_machine", "", "general"],
 ];
 
 const INDUSTRY_PRESETS = {

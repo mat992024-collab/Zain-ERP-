@@ -1,6 +1,7 @@
 const db = require('../db');
 const { sendJson, HttpError } = require('../core/http');
 const ledger = require('../core/ledger');
+const whatsapp = require('../core/whatsapp');
 
 function shiftSummary(shift) {
   const sales = db.get(
@@ -9,11 +10,23 @@ function shiftSummary(shift) {
   );
   const cash = db.get(
     `SELECT COALESCE(SUM(amount),0) AS total FROM treasury
-     WHERE shift_id = ? AND direction='in' AND source NOT IN ('sale_card','sale_wallet','sale_vodafone')`, [shift.id]
+     WHERE shift_id = ? AND direction='in' AND source NOT IN ('sale_card','sale_wallet','sale_vodafone','shift_open')`, [shift.id]
   );
   const vodafone = db.get(
     `SELECT COALESCE(SUM(amount),0) AS total FROM treasury
      WHERE shift_id = ? AND direction='in' AND source = 'sale_vodafone'`, [shift.id]
+  );
+  const card = db.get(
+    `SELECT COALESCE(SUM(amount),0) AS total FROM treasury
+     WHERE shift_id = ? AND direction='in' AND source = 'sale_card'`, [shift.id]
+  );
+  const wallet = db.get(
+    `SELECT COALESCE(SUM(amount),0) AS total FROM treasury
+     WHERE shift_id = ? AND direction='in' AND source = 'sale_wallet'`, [shift.id]
+  );
+  const credit = db.get(
+    `SELECT COALESCE(SUM(due),0) AS total FROM invoices
+     WHERE shift_id = ? AND type='sale' AND due > 0`, [shift.id]
   );
   const refunds = db.get(
     `SELECT COALESCE(SUM(amount),0) AS total FROM treasury
@@ -29,9 +42,47 @@ function shiftSummary(shift) {
     live_sales_count: sales.count,
     live_cash_in: cash.total,
     live_vodafone_in: vodafone.total,
+    live_card_in: card.total,
+    live_wallet_in: wallet.total,
+    live_credit_sales: credit.total,
     live_refunds: refunds.total,
     live_expenses: expenses.total,
     expected_cash: expected,
+  };
+}
+
+function buildShiftWhatsApp(shiftObj) {
+  const user = db.get('SELECT full_name FROM users WHERE id = ?', [shiftObj.user_id]);
+  const companyName = db.getSetting('company_name', 'زين ERP');
+  const managerPhone = db.getSetting('manager_whatsapp_phone', db.getSetting('company_phone', ''));
+  const activeBranch = shiftObj.branch || db.getSetting('active_branch', 'الفرع الرئيسي');
+
+  const text = whatsapp.formatShiftWhatsAppMessage({
+    companyName,
+    branch: activeBranch,
+    shiftId: shiftObj.id,
+    userName: user ? user.full_name : 'كاشير',
+    openedAt: shiftObj.opened_at,
+    closedAt: shiftObj.closed_at,
+    openingBalance: shiftObj.opening_balance,
+    closingBalance: shiftObj.closing_balance,
+    expectedCash: shiftObj.expected_cash,
+    salesTotal: shiftObj.live_sales_total,
+    salesCount: shiftObj.live_sales_count,
+    salesCash: shiftObj.live_cash_in,
+    salesVodafone: shiftObj.live_vodafone_in,
+    salesCard: shiftObj.live_card_in,
+    salesWallet: shiftObj.live_wallet_in,
+    salesCredit: shiftObj.live_credit_sales,
+    refunds: shiftObj.live_refunds,
+    expenses: shiftObj.live_expenses,
+    notes: shiftObj.notes || '',
+  });
+
+  return {
+    text,
+    url: whatsapp.buildWhatsAppUrl(managerPhone, text),
+    phone: managerPhone,
   };
 }
 
@@ -72,6 +123,14 @@ module.exports = {
       sendJson(ctx.res, 200, { shift: shiftSummary(shift) });
     });
 
+    router.get('/api/shifts/:id/whatsapp', (ctx) => {
+      const shift = db.get(`SELECT * FROM shifts WHERE id = ?`, [ctx.params.id]);
+      if (!shift) throw new HttpError(404, 'الوردية غير موجودة');
+      const summ = shiftSummary(shift);
+      const wa = buildShiftWhatsApp(summ);
+      sendJson(ctx.res, 200, wa);
+    });
+
     router.post('/api/shifts/open', (ctx) => {
       if (!ctx.can('pos.shift')) throw new HttpError(403, 'لا تملك صلاحية الورديات');
       const existing = db.get(`SELECT id FROM shifts WHERE status='open' AND user_id = ?`, [ctx.user.id]);
@@ -105,7 +164,9 @@ module.exports = {
         [closingBalance, summary.expected_cash, (ctx.body || {}).notes || null, shift.id]
       );
       db.logActivity(ctx.user.id, 'shift_close', 'shifts', shift.id, { closingBalance, expected: summary.expected_cash });
-      sendJson(ctx.res, 200, { shift: shiftSummary(db.get('SELECT * FROM shifts WHERE id = ?', [shift.id])) });
+      const closedShift = shiftSummary(db.get('SELECT * FROM shifts WHERE id = ?', [shift.id]));
+      const wa = buildShiftWhatsApp(closedShift);
+      sendJson(ctx.res, 200, { shift: closedShift, whatsapp: wa });
     });
   },
 };

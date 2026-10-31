@@ -411,6 +411,7 @@ export async function openSettings() {
         <div class="col-span-2 font-black text-zain-700 border-b border-slate-100 pb-2">معلومات المؤسسة</div>
         ${field('اسم المؤسسة', `<input id="set_company_name" class="field" value="${esc(s.company_name)}" />`)}
         ${field('الهاتف', `<input id="set_company_phone" class="field" value="${esc(s.company_phone)}" />`)}
+        ${field('واتساب المدير (لتقارير الورديات)', `<input id="set_manager_whatsapp_phone" class="field" value="${esc(s.manager_whatsapp_phone || '')}" placeholder="01012345678" />`)}
         ${field('العنوان', `<input id="set_company_address" class="field" value="${esc(s.company_address)}" />`)}
         ${field('الرقم الضريبي', `<input id="set_company_tax_id" class="field" value="${esc(s.company_tax_id)}" />`)}
         ${field('النشاط التجاري', `<select id="set_industry" class="field">${data.industries.map((i) => `<option value="${i.key}" ${i.key === s.industry ? 'selected' : ''}>${esc(i.label)}</option>`).join('')}</select>`)}
@@ -579,6 +580,7 @@ export async function openSettings() {
         const payload = {
           company_name: val('set_company_name'),
           company_phone: val('set_company_phone'),
+          manager_whatsapp_phone: val('set_manager_whatsapp_phone'),
           company_address: val('set_company_address'),
           company_tax_id: val('set_company_tax_id'),
           industry: val('set_industry'),

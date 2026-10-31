@@ -2,6 +2,7 @@ const db = require('../db');
 const { sendJson, HttpError } = require('../core/http');
 const ledger = require('../core/ledger');
 const cloudSync = require('../core/cloud-sync');
+const whatsapp = require('../core/whatsapp');
 const { recordMovement } = require('./products.routes');
 const currency = require('./currency.routes');
 
@@ -608,10 +609,67 @@ module.exports = {
       });
       db.logActivity(ctx.user.id, 'sale', 'invoices', result.id, { total: body.total, branch: body.branch || ctx.user.branch });
       if (creditWarning) db.logActivity(ctx.user.id, 'credit_limit_override', 'invoices', result.id, creditWarning);
+      const invRow = db.get('SELECT * FROM invoices WHERE id = ?', [result.id]);
+      const customer = invRow.customer_id ? db.get('SELECT name, phone FROM customers WHERE id = ?', [invRow.customer_id]) : null;
+      const invItems = db.all('SELECT name, qty, unit, unit_price, total FROM invoice_items WHERE invoice_id = ?', [result.id]);
+      const custPhone = (body.customer_phone || (customer ? customer.phone : '')) || '';
+      const companyName = db.getSetting('company_name', 'زين ERP');
+      const waText = whatsapp.formatInvoiceWhatsAppMessage({
+        companyName,
+        branch: invRow.branch,
+        invoiceNo: invRow.invoice_no,
+        date: invRow.created_at,
+        customerName: customer ? customer.name : (body.customer_name || 'عميل نقدي'),
+        items: invItems,
+        subtotal: invRow.subtotal,
+        discount: invRow.discount,
+        tax: invRow.tax,
+        total: invRow.total,
+        paid: invRow.paid,
+        due: invRow.due,
+        paymentMethod: invRow.payment_method === 'cash' ? 'نقدي' : (invRow.payment_method === 'vodafone' ? 'فودافون كاش' : (invRow.payment_method === 'card' ? 'فيزا/شبكة' : invRow.payment_method)),
+        footerNote: db.getSetting('receipt_footer', 'شكراً لتعاملكم معنا ونسعد بزيارتكم دائماً!'),
+      });
+      const waUrl = custPhone ? whatsapp.buildWhatsAppUrl(custPhone, waText) : '';
       sendJson(ctx.res, 201, {
-        invoice: db.get('SELECT * FROM invoices WHERE id = ?', [result.id]),
+        invoice: invRow,
         id: result.id,
         credit_warning: creditWarning,
+        whatsapp: {
+          url: waUrl,
+          text: waText,
+          phone: custPhone,
+        },
+      });
+    });
+
+    router.get('/api/sales/:id/whatsapp', (ctx) => {
+      const inv = db.get('SELECT * FROM invoices WHERE id = ?', [ctx.params.id]);
+      if (!inv) throw new HttpError(404, 'الفاتورة غير موجودة');
+      const customer = inv.customer_id ? db.get('SELECT name, phone FROM customers WHERE id = ?', [inv.customer_id]) : null;
+      const items = db.all('SELECT name, qty, unit, unit_price, total FROM invoice_items WHERE invoice_id = ?', [inv.id]);
+      const phone = ctx.query.phone || (customer ? customer.phone : '');
+      const companyName = db.getSetting('company_name', 'زين ERP');
+      const text = whatsapp.formatInvoiceWhatsAppMessage({
+        companyName,
+        branch: inv.branch,
+        invoiceNo: inv.invoice_no,
+        date: inv.created_at,
+        customerName: customer ? customer.name : 'عميل نقدي',
+        items,
+        subtotal: inv.subtotal,
+        discount: inv.discount,
+        tax: inv.tax,
+        total: inv.total,
+        paid: inv.paid,
+        due: inv.due,
+        paymentMethod: inv.payment_method === 'cash' ? 'نقدي' : (inv.payment_method === 'vodafone' ? 'فودافون كاش' : (inv.payment_method === 'card' ? 'فيزا/شبكة' : inv.payment_method)),
+        footerNote: db.getSetting('receipt_footer', 'شكراً لتعاملكم معنا ونسعد بزيارتكم دائماً!'),
+      });
+      sendJson(ctx.res, 200, {
+        text,
+        url: phone ? whatsapp.buildWhatsAppUrl(phone, text) : '',
+        phone,
       });
     });
 

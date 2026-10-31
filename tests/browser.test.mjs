@@ -439,8 +439,12 @@ async function main() {
 
   phase = 'statement';
   await evalJs(`location.hash = '#/customers'`);
-  await sleep(1500);
-  const stmtBtn = await evalJs(`!!document.querySelector('[data-stmt]')`);
+  let stmtBtn = false;
+  for (let i = 0; i < 15; i++) {
+    await sleep(300);
+    stmtBtn = await evalJs(`!!document.querySelector('[data-stmt]')`);
+    if (stmtBtn) break;
+  }
   check('statement button present in customers list', stmtBtn === true);
   await evalJs(`document.querySelector('[data-stmt]').click()`);
   await sleep(1500);
