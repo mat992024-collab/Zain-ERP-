@@ -13,6 +13,7 @@
     "seed": "node src/server/seed.js",
     "reset": "node src/server/reset.js",
     "doctor": "node src/server/doctor.js",
+    "sync:watch": "node scripts/git-sync.mjs",
     "test": "npm run test:api && npm run test:render && npm run test:ui",
     "test:api": "node tests/e2e.js",
     "test:render": "node tests/render.test.mjs",
