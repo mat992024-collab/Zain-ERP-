@@ -3,6 +3,7 @@
 
 <head>
   <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Zain ERP - نظام زين المحاسبي</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%236366f1'/%3E%3Cpath d='M26 64l15-17 12 10 20-24' stroke='white' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
@@ -16,7 +17,27 @@
     .pos-panel { height: calc(100vh - 72px); }
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .hidden { display: none !important; }
+    [hidden] { display: none !important; }
   </style>
+  <script>
+    if (window.location.protocol === 'file:') {
+      window.addEventListener('DOMContentLoaded', function() {
+        var el = document.createElement('div');
+        el.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:#0f172a;color:#fff;z-index:999999;display:flex;align-items:center;justify-content:center;padding:20px;font-family:Cairo,Segoe UI,Tahoma,sans-serif;direction:rtl;text-align:center;';
+        el.innerHTML = '<div style="background:#1e293b;border:2px solid #ef4444;border-radius:18px;max-width:540px;padding:32px;box-shadow:0 25px 50px rgba(0,0,0,0.5);"><div style="font-size:48px;margin-bottom:12px;">⚠️</div><h2 style="font-size:22px;font-weight:900;margin-bottom:12px;color:#f87171;">تنبيه: فتح غير صحيح للنظام</h2><p style="font-size:15px;line-height:1.7;color:#cbd5e1;margin-bottom:20px;">تم فتح صفحة النظام مباشرة كملف محلي (file://). يعمل نظام زين كخادم سطح مكتب محلي ولا يمكن تشغيله بفتح ملف HTML يدوياً.<br><br><b>طريقة التشغيل الصحيحة:</b><br>1. شغّل البرنامج من اختصار سطح المكتب <b>Zain ERP</b> أو اضغط على <b>Zain.vbs</b>.<br>2. أو افتح المتصفح على: <code style="background:#334155;padding:3px 8px;border-radius:6px;color:#38bdf8;direction:ltr;display:inline-block;">http://127.0.0.1:4782</code></p><a href="http://127.0.0.1:4782" style="display:inline-block;background:#2563eb;color:#fff;font-weight:bold;padding:10px 24px;border-radius:10px;text-decoration:none;">فتح الرابط المحلي الآن</a></div>';
+        document.body.appendChild(el);
+      });
+    }
+    if (window.document.documentMode || (!window.CSS || !CSS.supports || !CSS.supports('display', 'flex'))) {
+      window.addEventListener('DOMContentLoaded', function() {
+        var el = document.createElement('div');
+        el.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:#0f172a;color:#fff;z-index:999999;display:flex;align-items:center;justify-content:center;padding:20px;font-family:sans-serif;direction:rtl;text-align:center;';
+        el.innerHTML = '<div style="background:#1e293b;border:2px solid #f59e0b;border-radius:18px;max-width:520px;padding:28px;"><div style="font-size:44px;margin-bottom:10px;">🌐</div><h2 style="font-size:20px;color:#fbbf24;margin-bottom:10px;">المتصفح الحالي غير مدعوم</h2><p style="font-size:14px;color:#cbd5e1;line-height:1.6;">يتطلب نظام زين متصفحاً حديثاً يدعم المعايير القياسية (مثل Microsoft Edge أو Google Chrome). يرجى فتح النظام بواسطة Microsoft Edge المتوفر في ويندوز 10.</p></div>';
+        document.body.appendChild(el);
+      });
+    }
+  </script>
 </head>
 
 <body>
@@ -50,7 +71,7 @@
       </div>
     </div>
 
-    <div id="main" class="hidden h-full">
+    <div id="main" class="hidden h-full" style="display:none">
       <aside class="sidebar fixed right-0 top-0 bottom-0 text-white flex flex-col print-hide">
         <div class="p-6 flex items-center gap-3 border-b border-white/10">
           <div class="w-12 h-12 grid place-items-center rounded-xl bg-white/15 text-2xl">

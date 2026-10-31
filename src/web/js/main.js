@@ -86,7 +86,9 @@ async function boot() {
     } catch { localStorage.removeItem('zain_token'); state.token = null; }
   }
   authEl.classList.remove('hidden');
+  authEl.style.display = '';
   mainEl.classList.add('hidden');
+  mainEl.style.display = 'none';
 }
 
 async function enterApp() {
@@ -99,7 +101,9 @@ async function enterApp() {
   await refreshShift();
 
   authEl.classList.add('hidden');
+  authEl.style.display = 'none';
   mainEl.classList.remove('hidden');
+  mainEl.style.display = '';
   buildNav();
 
   document.getElementById('userInfo').textContent = state.user.full_name || state.user.username;
@@ -194,7 +198,9 @@ async function logout() {
   state.user = null;
   location.hash = '';
   mainEl.classList.add('hidden');
+  mainEl.style.display = 'none';
   authEl.classList.remove('hidden');
+  authEl.style.display = '';
 }
 
 function shiftAction() {

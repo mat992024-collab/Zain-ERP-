@@ -7,3 +7,5 @@ installer/*.exe
 .DS_Store
 Thumbs.db
 src/web/assets/*.css.map
+*.dll
+!installer/*.dll

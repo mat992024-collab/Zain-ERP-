@@ -34,8 +34,12 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "node.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "vcruntime140.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "vcruntime140_1.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "msvcp140.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\Zain.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\package.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\key_generator.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\*"; DestDir: "{app}\src"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
