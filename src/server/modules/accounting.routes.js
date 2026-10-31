@@ -213,6 +213,7 @@ module.exports = {
   buildInventoryReport,
   buildTaxReport,
   buildSalesAnalysis,
+  buildZakatReport,
   register(router) {
     router.get('/api/accounts', (ctx) => {
       const rows = db.all('SELECT * FROM accounts ORDER BY code');
@@ -511,6 +512,10 @@ module.exports = {
     router.get('/api/reports/sales-analysis', (ctx) => {
       sendJson(ctx.res, 200, buildSalesAnalysis(ctx.query));
     });
+
+    router.get('/api/reports/zakat', (ctx) => {
+      sendJson(ctx.res, 200, buildZakatReport(ctx.query));
+    });
   },
 };
 
@@ -605,5 +610,71 @@ function buildInventoryReport(query = {}) {
     rows,
     categories,
     totals,
+  };
+}
+
+function round2(v) {
+  return Math.round((Number(v) || 0) * 100) / 100;
+}
+
+function buildZakatReport(query = {}) {
+  const s = db.getSettings();
+  const rate = Number(query.rate) || Number(s.zakat_rate) || 2.5;
+  const nisabGrams = Number(query.nisab_grams) || Number(s.zakat_nisab_grams) || 85;
+  const goldPrice = Number(query.gold_price != null ? query.gold_price : s.zakat_gold_price) || 0;
+  const includeReceivables = query.include_receivables != null
+    ? String(query.include_receivables) !== '0'
+    : (s.zakat_include_receivables === undefined || String(s.zakat_include_receivables) === '1');
+  const includeLiabilities = query.include_liabilities != null
+    ? String(query.include_liabilities) !== '0'
+    : (s.zakat_include_liabilities === undefined || String(s.zakat_include_liabilities) === '1');
+
+  const treasuryBalance = ledger.currentTreasuryBalance();
+
+  const inventoryCost = db.get('SELECT COALESCE(SUM(quantity * cost_price),0) AS v FROM products WHERE is_active=1');
+  const inventorySale = db.get('SELECT COALESCE(SUM(quantity * sale_price),0) AS v FROM products WHERE is_active=1');
+
+  const receivables = db.get('SELECT COALESCE(SUM(balance),0) AS v FROM customers WHERE balance > 0');
+  const liabilities = db.get('SELECT COALESCE(SUM(balance),0) AS v FROM suppliers WHERE balance > 0');
+
+  const cashValue = round2(treasuryBalance);
+  const inventoryValue = round2(inventoryCost.v);
+  const inventorySaleValue = round2(inventorySale.v);
+  const receivablesValue = includeReceivables ? round2(receivables.v) : 0;
+  const liabilitiesValue = includeLiabilities ? round2(liabilities.v) : 0;
+
+  const grossAssets = round2(cashValue + inventoryValue + receivablesValue);
+  const netAssets = round2(grossAssets - liabilitiesValue);
+  const nisabValue = round2(nisabGrams * goldPrice);
+  const reachesNisab = nisabValue > 0 ? netAssets >= nisabValue : netAssets > 0;
+  const zakatDue = reachesNisab ? round2(netAssets * rate / 100) : 0;
+
+  return {
+    generated_at: new Date().toLocaleString('ar-IQ'),
+    settings: {
+      rate,
+      nisab_grams: nisabGrams,
+      gold_price: goldPrice,
+      include_receivables: includeReceivables,
+      include_liabilities: includeLiabilities,
+    },
+    assets: {
+      cash: cashValue,
+      inventory_cost: inventoryValue,
+      inventory_sale: inventorySaleValue,
+      receivables: receivablesValue,
+      gross: grossAssets,
+    },
+    liabilities: liabilitiesValue,
+    net_assets: netAssets,
+    nisab: {
+      grams: nisabGrams,
+      gold_price: goldPrice,
+      value: nisabValue,
+      reached: reachesNisab,
+    },
+    rate,
+    zakat_due: zakatDue,
+    treasury_balance: round2(treasuryBalance),
   };
 }

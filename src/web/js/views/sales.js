@@ -1,11 +1,11 @@
 import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, formToObject, downloadFile } from '../core.js';
 
 const TYPE_LABELS = { sale: 'بيع', return_sale: 'مرتجع بيع', purchase: 'شراء', return_purchase: 'مرتجع شراء' };
-const METHOD_LABELS = { cash: 'نقدي', card: 'بطاقة', wallet: 'محفظة', credit: 'آجل', mixed: 'مختلط', bank: 'بنكي' };
+const METHOD_LABELS = { cash: 'نقدي', vodafone_cash: 'فودافون كاش', card: 'بطاقة', wallet: 'محفظة', credit: 'آجل', mixed: 'مختلط', bank: 'بنكي' };
 
 export async function renderSales(c) {
   let page = 1;
-  let filter = { type: '', from: '', to: '', search: '' };
+  let filter = { type: '', from: '', to: '', search: '', branch: '', order_type: '' };
   if (state.pendingSearch && state.pendingSearch.view === 'sales') {
     filter.search = state.pendingSearch.q;
     state.pendingSearch = null;
@@ -13,22 +13,35 @@ export async function renderSales(c) {
   c.innerHTML = `
     <div class="card">
       <div class="p-4 flex flex-wrap items-center gap-3 border-b border-slate-100">
-        <input id="sSearch" class="field !w-56" placeholder="رقم الفاتورة / العميل" />
-        <select id="sType" class="field !w-40">
+        <input id="sSearch" class="field !w-44" placeholder="رقم الفاتورة / العميل" />
+        <select id="sType" class="field !w-32">
           <option value="">كل الأنواع</option>
           <option value="sale">بيع</option>
           <option value="return_sale">مرتجع بيع</option>
           <option value="purchase">شراء</option>
+          <option value="return_purchase">مرتجع شراء</option>
         </select>
-        <input id="sFrom" type="date" class="field !w-40" />
-        <input id="sTo" type="date" class="field !w-40" />
+        <select id="sBranch" class="field !w-32">
+          <option value="">كل الفروع</option>
+          <option value="فرع سموحة">فرع سموحة</option>
+          <option value="فرع ميت غمر">فرع ميت غمر</option>
+          <option value="الفرع الرئيسي">الفرع الرئيسي</option>
+        </select>
+        <select id="sOrderType" class="field !w-36">
+          <option value="">كل الطلبات</option>
+          <option value="direct">بيع مباشر</option>
+          <option value="external_delivery">تسليمات خارجية</option>
+        </select>
+        <input id="sFrom" type="date" class="field !w-36" />
+        <input id="sTo" type="date" class="field !w-36" />
         <button id="sApply" class="btn btn-primary"><i class="bi bi-funnel"></i> تصفية</button>
+        <button id="sReturnsWaste" class="btn btn-ghost text-amber-600 font-bold"><i class="bi bi-arrow-return-right"></i> المرتجعات والهالك</button>
         <button id="sExport" class="btn btn-ghost"><i class="bi bi-filetype-csv"></i> تصدير CSV</button>
         <div class="ml-auto text-lg font-black text-zain-700" id="sTotal"></div>
       </div>
       <div class="overflow-auto max-h-[calc(100vh-230px)]">
         <table class="w-full">
-          <thead><tr><th class="th">الفاتورة</th><th class="th">التاريخ</th><th class="th">النوع</th><th class="th">العميل/المورد</th><th class="th">الأصناف</th><th class="th">الدفع</th><th class="th">الإجمالي</th><th class="th">الربح</th><th class="th">المتبقي</th><th class="th"></th></tr></thead>
+          <thead><tr><th class="th">الفاتورة</th><th class="th">التاريخ</th><th class="th">الفرع</th><th class="th">الطلب</th><th class="th">النوع</th><th class="th">العميل/المورد</th><th class="th">الأصناف</th><th class="th">الدفع</th><th class="th">الإجمالي</th><th class="th">الربح</th><th class="th">المتبقي</th><th class="th"></th></tr></thead>
           <tbody id="sBody"></tbody>
         </table>
       </div>
@@ -48,6 +61,8 @@ export async function renderSales(c) {
       <tr class="tr">
         <td class="td font-mono text-xs font-bold text-zain-700">${esc(r.invoice_no)}</td>
         <td class="td text-xs">${esc(r.created_at)}</td>
+        <td class="td text-xs font-bold text-slate-600">${esc(r.branch || 'الرئيسي')}</td>
+        <td class="td">${r.order_type === 'external_delivery' ? `<button data-deliv-stat="${r.id}" data-cur-stat="${r.delivery_status || 'preparing'}" class="badge ${r.delivery_status === 'delivered' ? 'badge-ok' : r.delivery_status === 'ready' ? 'badge-info' : 'badge-warn'} cursor-pointer" title="تحديث حالة التسليم">${{preparing:'قيد التجهيز', ready:'جاهز للتسليم', delivered:'تم التسليم'}[r.delivery_status] || r.delivery_status}</button>` : '<span class="text-xs text-slate-400">مباشر</span>'}</td>
         <td class="td"><span class="badge ${r.type === 'sale' ? 'badge-ok' : r.type === 'purchase' ? 'badge-info' : 'badge-warn'}">${TYPE_LABELS[r.type] || r.type}</span></td>
         <td class="td">${esc(r.customer_name || r.supplier_name || 'نقدي')}</td>
         <td class="td">${r.items_count}</td>
@@ -62,18 +77,49 @@ export async function renderSales(c) {
           ${r.type === 'sale' ? `<button data-ret="${r.id}" class="btn btn-ghost btn-sm text-amber-600" title="مرتجع بيع"><i class="bi bi-arrow-return-right"></i></button>` : ''}
           ${r.type === 'purchase' ? `<button data-puret="${r.id}" class="btn btn-ghost btn-sm text-amber-600" title="مرتجع شراء"><i class="bi bi-arrow-return-left"></i></button>` : ''}
         </div></td>
-      </tr>`).join('') : `<tr><td colspan="10" class="td text-center text-slate-400 py-10">لا توجد فواتير</td></tr>`;
+      </tr>`).join('') : `<tr><td colspan="12" class="td text-center text-slate-400 py-10">لا توجد فواتير</td></tr>`;
     c.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view(+b.dataset.view)));
     c.querySelectorAll('[data-print]').forEach((b) => b.addEventListener('click', () => printMenu(+b.dataset.print)));
     c.querySelectorAll('[data-ret]').forEach((b) => b.addEventListener('click', () => salesReturn(+b.dataset.ret, load)));
     c.querySelectorAll('[data-puret]').forEach((b) => b.addEventListener('click', () => purchaseReturn(+b.dataset.puret, load)));
     c.querySelectorAll('[data-rep]').forEach((b) => b.addEventListener('click', () => repeatInvoice(+b.dataset.rep, load)));
+    c.querySelectorAll('[data-deliv-stat]').forEach((b) => b.addEventListener('click', async () => {
+      const id = +b.dataset.delivStat;
+      const cur = b.dataset.curStat;
+      modal({
+        title: 'تحديث حالة أمر التشغيل / التسليم',
+        size: 'max-w-sm',
+        body: `
+          <div class="space-y-3">
+            <label class="label">الحالة الجديدة للطلب:</label>
+            <div class="space-y-2">
+              <button data-set-status="preparing" class="btn ${cur === 'preparing' ? 'btn-primary' : 'btn-ghost'} w-full justify-start"><i class="bi bi-hourglass-split"></i> قيد التجهيز بالمطبعة</button>
+              <button data-set-status="ready" class="btn ${cur === 'ready' ? 'btn-primary' : 'btn-ghost'} w-full justify-start"><i class="bi bi-box-seam"></i> جاهز للاستلام والتسليم</button>
+              <button data-set-status="delivered" class="btn ${cur === 'delivered' ? 'btn-primary' : 'btn-ghost'} w-full justify-start"><i class="bi bi-check-circle"></i> تم التسليم للعميل</button>
+            </div>
+          </div>`,
+        footer: `<button data-cancel class="btn btn-ghost">إلغاء</button>`,
+        onMount(wrap, close) {
+          wrap.querySelectorAll('[data-set-status]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+              const status = btn.dataset.setStatus;
+              await api('PATCH', `/api/sales/${id}/delivery-status`, { status });
+              toast('تم تحديث حالة الطلب بنجاح', 'success');
+              close();
+              load();
+            });
+          });
+        },
+      });
+    }));
   };
 
   c.querySelector('#sApply').addEventListener('click', () => {
     filter = {
       search: c.querySelector('#sSearch').value,
       type: c.querySelector('#sType').value,
+      branch: c.querySelector('#sBranch').value,
+      order_type: c.querySelector('#sOrderType').value,
       from: c.querySelector('#sFrom').value,
       to: c.querySelector('#sTo').value,
     };
@@ -92,6 +138,98 @@ export async function renderSales(c) {
       toast('تم تصدير الملف', 'success');
     } catch (e) { toast(e.message, 'error'); }
   });
+  c.querySelector('#sReturnsWaste').addEventListener('click', () => returnsWasteModal(load));
+
+  async function returnsWasteModal(reload) {
+    const [retSales, retPurchases] = await Promise.all([
+      api('GET', '/api/sales?type=return_sale&page_size=20').catch(() => ({ rows: [], sum_total: 0, total: 0 })),
+      api('GET', '/api/sales?type=return_purchase&page_size=20').catch(() => ({ rows: [], sum_total: 0, total: 0 })),
+    ]);
+    const maxDays = Number(state.settings?.return_policy_max_days) || 0;
+
+    modal({
+      title: 'مديول إدارة المرتجعات والهالك التالف',
+      size: 'max-w-4xl',
+      body: `
+        <div class="space-y-4">
+          <div class="grid grid-cols-3 gap-3">
+            <div class="kpi">
+              <div class="kpi-value text-amber-600">${money(retSales.sum_total || 0)}</div>
+              <div class="kpi-label">إجمالي مرتجعات البيع (${retSales.total || 0})</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-value text-indigo-600">${money(retPurchases.sum_total || 0)}</div>
+              <div class="kpi-label">إجمالي مرتجعات الشراء (${retPurchases.total || 0})</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-value text-slate-800">${maxDays > 0 ? `${maxDays} يوم` : 'غير محدد (مفتوح)'}</div>
+              <div class="kpi-label">سياسة مهلة الإرجاع المسموحة</div>
+            </div>
+          </div>
+
+          <div class="card p-3 bg-amber-50/50 border border-amber-200">
+            <div class="text-xs font-bold text-amber-900 mb-2">إرجاع سريع برقم الفاتورة أو الباركود:</div>
+            <div class="flex gap-2">
+              <input id="rwInvNo" class="field flex-1" placeholder="أدخل رقم الفاتورة (مثال: INV-2026-00001)..." />
+              <button id="rwFindBtn" class="btn btn-warning"><i class="bi bi-search"></i> فتح شاشة المرتجع</button>
+            </div>
+          </div>
+
+          <div>
+            <div class="font-bold text-sm text-slate-800 mb-2">سجل المرتجعات الأخير</div>
+            <div class="overflow-auto max-h-60 border border-slate-200 rounded-xl">
+              <table class="w-full text-xs">
+                <thead class="bg-slate-50 font-bold text-slate-700">
+                  <tr>
+                    <th class="p-2 text-right">رقم المرتجع</th>
+                    <th class="p-2 text-right">التاريخ</th>
+                    <th class="p-2 text-right">النوع</th>
+                    <th class="p-2 text-right">الطرف</th>
+                    <th class="p-2 text-right">المبلغ المسترد</th>
+                    <th class="p-2 text-center">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${[...(retSales.rows || []), ...(retPurchases.rows || [])].sort((a, b) => b.id - a.id).slice(0, 20).map((r) => `
+                    <tr class="border-b border-slate-100 hover:bg-slate-50">
+                      <td class="p-2 font-mono font-bold text-slate-800">${esc(r.invoice_no)}</td>
+                      <td class="p-2 text-slate-500">${esc(r.created_at)}</td>
+                      <td class="p-2"><span class="badge ${r.type === 'return_sale' ? 'badge-warn' : 'badge-info'}">${TYPE_LABELS[r.type] || r.type}</span></td>
+                      <td class="p-2">${esc(r.customer_name || r.supplier_name || 'نقدي')}</td>
+                      <td class="p-2 font-bold text-amber-700">${money(r.total)}</td>
+                      <td class="p-2 text-center">
+                        <button data-rw-view="${r.id}" class="btn btn-ghost btn-sm"><i class="bi bi-eye"></i></button>
+                        <button data-rw-print="${r.id}" class="btn btn-ghost btn-sm"><i class="bi bi-printer"></i></button>
+                      </td>
+                    </tr>
+                  `).join('') || `<tr><td colspan="6" class="p-6 text-center text-slate-400">لا توجد مرتجعات مسجلة حتى الآن</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>`,
+      footer: `<button data-cancel class="btn btn-ghost">إغلاق</button>`,
+      onMount(wrap, close) {
+        wrap.querySelector('[data-cancel]').addEventListener('click', close);
+        wrap.querySelectorAll('[data-rw-view]').forEach((b) => b.addEventListener('click', () => view(+b.dataset.rwView)));
+        wrap.querySelectorAll('[data-rw-print]').forEach((b) => b.addEventListener('click', () => printMenu(+b.dataset.rwPrint)));
+
+        wrap.querySelector('#rwFindBtn').addEventListener('click', async () => {
+          const invNo = (wrap.querySelector('#rwInvNo').value || '').trim();
+          if (!invNo) { toast('أدخل رقم الفاتورة للبحث', 'error'); return; }
+          try {
+            const res = await api('GET', `/api/sales?search=${encodeURIComponent(invNo)}&page_size=5`);
+            const matched = (res.rows || []).find((r) => r.invoice_no.toLowerCase() === invNo.toLowerCase()) || (res.rows || [])[0];
+            if (!matched) { toast('لم يتم العثور على الفاتورة المطلوبة', 'error'); return; }
+            close();
+            if (matched.type === 'sale') salesReturn(matched.id, reload);
+            else if (matched.type === 'purchase') purchaseReturn(matched.id, reload);
+            else toast('هذه الفاتورة هي مرتجع بالفعل', 'error');
+          } catch (e) { toast(e.message, 'error'); }
+        });
+      },
+    });
+  }
 
   async function view(id) {
     const data = await api('GET', `/api/sales/${id}`);

@@ -31,6 +31,7 @@ const MODULES = [
   require('./modules/activity.routes'),
   require('./modules/search.routes'),
   require('./modules/scheduled.routes'),
+  require('./modules/sync.routes'),
 ];
 
 function buildRouter() {
@@ -134,7 +135,7 @@ function createServer() {
   return { server, router };
 }
 
-function start(port = process.env.ZAIN_PORT || 4180, host = '127.0.0.1') {
+function start(port = process.env.ZAIN_PORT || 4782, host = process.env.ZAIN_HOST || '0.0.0.0') {
   const { server } = createServer();
   return new Promise((resolve) => {
     server.listen(port, host, () => resolve({ server, port: server.address().port, host }));
@@ -142,8 +143,9 @@ function start(port = process.env.ZAIN_PORT || 4180, host = '127.0.0.1') {
 }
 
 if (require.main === module) {
-  const port = Number(process.env.ZAIN_PORT || 4180);
-  start(port).then(({ port: p }) => {
+  const port = Number(process.env.ZAIN_PORT || 4782);
+  const host = process.env.ZAIN_HOST || '0.0.0.0';
+  start(port, host).then(({ port: p, host: h }) => {
     console.log(`Zain ERP server running: http://127.0.0.1:${p}  (db: ${db.DB_PATH})`);
     setTimeout(() => {
       console.log('Ready. Open the URL in Edge/Chrome (app mode recommended).');

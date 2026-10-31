@@ -1,5 +1,8 @@
 node_modules/
 data/
+installer_output/
+installer/*.exe
+*.exe
 *.log
 .DS_Store
 Thumbs.db

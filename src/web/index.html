@@ -6,9 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Zain ERP - نظام زين المحاسبي</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%236366f1'/%3E%3Cpath d='M26 64l15-17 12 10 20-24' stroke='white' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="/assets/vendor/cairo.css" />
-  <link rel="stylesheet" href="/assets/app.css" />
-  <link rel="stylesheet" href="/assets/vendor/bootstrap-icons.min.css" />
+  <link rel="stylesheet" href="assets/vendor/cairo.css" />
+  <link rel="stylesheet" href="assets/app.css" />
+  <link rel="stylesheet" href="assets/vendor/bootstrap-icons.min.css" />
   <style>
     :root { --sidebar: 278px; }
     .sidebar { width: var(--sidebar); background: radial-gradient(circle at 20% 10%, #4f46e5 0%, #312e81 95%); }
@@ -22,7 +22,7 @@
 <body>
   <div id="app" class="h-full flex flex-col">
     <div id="auth" class="fixed inset-0 bg-gradient-to-br from-zain-600 to-indigo-900 flex items-center justify-center p-4 print-hide">
-      <div class="card w-full max-w-md p-8 animate-slide-up">
+      <div class="card w-full max-w-md p-8 animate-slide-up" style="background:#ffffff !important; border:2px solid #94a3af !important; box-shadow:0 20px 40px rgba(0,0,0,0.2) !important;">
         <div class="flex flex-col items-center mb-8">
           <div class="w-16 h-16 grid place-items-center rounded-2xl bg-zain-500 text-white text-3xl shadow-lg shadow-zain-500/25">
             <i class="bi bi-graph-up-arrow"></i>
@@ -32,14 +32,14 @@
         </div>
         <form id="loginForm" class="space-y-4">
           <div>
-            <label class="label">اسم المستخدم</label>
-            <input class="field" name="username" value="admin" autocomplete="username" />
+            <label class="label text-slate-700 font-bold">اسم المستخدم</label>
+            <input class="field font-bold" name="username" value="admin" autocomplete="username" style="background-color:#ffffff !important; color:#0f172a !important; border:2px solid #9ca3af !important; border-radius:0.75rem;" />
           </div>
           <div>
-            <label class="label">كلمة المرور</label>
-            <input class="field" type="password" name="password" value="admin" autocomplete="current-password" />
+            <label class="label text-slate-700 font-bold">كلمة المرور</label>
+            <input class="field font-bold" type="password" name="password" value="admin" autocomplete="current-password" style="background-color:#ffffff !important; color:#0f172a !important; border:2px solid #9ca3af !important; border-radius:0.75rem;" />
           </div>
-          <button type="submit" class="btn-primary w-full h-12 text-base">
+          <button type="submit" class="btn btn-primary w-full h-12 text-base font-bold" style="background-color:#1d4ed8 !important; border:2px solid #1e40af !important; color:#ffffff !important; box-shadow:0 4px 14px rgba(29, 78, 216, 0.45) !important;">
             <i class="bi bi-box-arrow-in-left"></i> تسجيل الدخول
           </button>
           <div id="loginError" class="hidden text-center text-xs font-bold text-rose-600"></div>
@@ -86,6 +86,18 @@
             <div id="statusBar" class="text-xs text-slate-500 pr-4 border-r border-slate-200 hidden"></div>
           </div>
           <div class="flex items-center gap-2">
+            <button id="branchSelectorBtn" class="btn btn-ghost !bg-indigo-50 !text-indigo-700 !border-indigo-200 text-xs font-bold" title="الفرع الحالي">
+              <i class="bi bi-geo-alt-fill text-indigo-500"></i> <span id="currentBranchName">فرع سموحة</span>
+            </button>
+            <button id="mobileSyncBtn" class="btn btn-ghost !bg-emerald-50 !text-emerald-700 !border-emerald-200 text-xs font-bold" title="متابعة عبر الموبايل">
+              <i class="bi bi-phone text-emerald-500"></i> الموبايل
+            </button>
+            <button id="ownerPinBtn" class="btn btn-ghost !bg-amber-50 !text-amber-800 !border-amber-200 text-xs font-bold" title="تقارير المالك السرية">
+              <i class="bi bi-shield-lock text-amber-600"></i> أرباح المالك
+            </button>
+            <button id="cloudSyncBtn" class="btn btn-ghost !bg-cyan-50 !text-cyan-800 !border-cyan-200 text-xs font-bold" title="المزامنة السحابية للفروع">
+              <i class="bi bi-cloud-arrow-up text-cyan-600"></i> سحابي
+            </button>
             <button id="searchBtn" class="btn btn-ghost" title="بحث سريع (Ctrl+K)"><i class="bi bi-search"></i> بحث سريع</button>
             <button id="themeBtn" class="btn btn-ghost h-10 w-10 p-0" title="الوضع الداكن"><i class="bi bi-moon-stars" id="themeIcon"></i></button>
             <button id="refreshBtn" class="btn btn-ghost"><i class="bi bi-arrow-clockwise"></i> تحديث</button>
@@ -100,6 +112,6 @@
   <div id="modalRoot"></div>
   <div id="toastRoot" class="fixed top-20 left-6 flex flex-col gap-2 z-[60] print-hide"></div>
 
-  <script type="module" src="/js/main.js"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 4199;
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = `http://127.0.41.80:${PORT}`;
 const DB = path.join(ROOT, 'data', 'test', 'render-test.db');
 
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(DB + s); } catch {} }
@@ -50,10 +50,8 @@ process.on('unhandledRejection', (e) => { unhandled.push(e); console.log('ASYNC 
 const child = spawn(process.execPath, ['src/server/index.js'], {
   cwd: ROOT,
   env: { ...process.env, ZAIN_PORT: String(PORT), ZAIN_DB: DB },
-  stdio: ['ignore', 'pipe', 'pipe'],
+  stdio: 'inherit',
 });
-child.stderr.on('data', (d) => process.stdout.write('[err] ' + d));
-child.on('exit', (c) => process.stdout.write('[srv exit] ' + c + '\n'));
 
 async function main() {
   const realFetch = globalThis.fetch;

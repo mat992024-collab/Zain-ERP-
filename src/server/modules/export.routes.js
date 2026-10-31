@@ -273,5 +273,72 @@ module.exports = {
         entities: Object.entries(ENTITIES).map(([key, e]) => ({ key, label: e.label })),
       }));
     });
+
+    router.get('/api/export-json', (ctx) => {
+      if (!ctx.user || (ctx.user.role !== 'admin' && !ctx.can('admin.users'))) {
+        throw new HttpError(403, 'لا تملك صلاحية التصدير الشامل');
+      }
+      const payload = {
+        version: 1,
+        exported_at: new Date().toISOString(),
+        settings: db.getSettings(),
+        products: db.all('SELECT * FROM products'),
+        customers: db.all('SELECT * FROM customers'),
+        suppliers: db.all('SELECT * FROM suppliers'),
+        accounts: db.all('SELECT * FROM accounts'),
+      };
+      db.logActivity(ctx.user.id, 'export', 'system_json', null, { products: payload.products.length });
+      ctx.res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': `attachment; filename="zain-backup-${Date.now()}.json"`,
+      });
+      ctx.res.end(JSON.stringify(payload, null, 2));
+    });
+
+    router.post('/api/import-json', (ctx) => {
+      if (!ctx.user || ctx.user.role !== 'admin') {
+        throw new HttpError(403, 'يتطلب استيراد JSON صلاحية المدير');
+      }
+      const body = ctx.body || {};
+      let imported = 0;
+      if (Array.isArray(body.products)) {
+        for (const p of body.products) {
+          if (!p || !p.name) continue;
+          const existing = (p.barcode ? db.get('SELECT id FROM products WHERE barcode = ?', [p.barcode]) : null) ||
+                           (p.sku ? db.get('SELECT id FROM products WHERE sku = ?', [p.sku]) : null) ||
+                           db.get('SELECT id FROM products WHERE name = ?', [p.name]);
+          if (existing) {
+            db.run('UPDATE products SET cost_price = ?, sale_price = ?, wholesale_price = ?, quantity = ?, updated_at = datetime(\'now\',\'localtime\') WHERE id = ?',
+              [Number(p.cost_price) || 0, Number(p.sale_price) || 0, Number(p.wholesale_price) || 0, Number(p.quantity) || 0, existing.id]);
+          } else {
+            db.run(`INSERT INTO products (name, barcode, sku, package_size, category, unit, cost_price, sale_price, wholesale_price, quantity, reorder_level, shelf_location, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'), datetime('now','localtime'))`,
+              [p.name, p.barcode || null, p.sku || null, p.package_size || null, p.category || 'عام', p.unit || 'قطعة', Number(p.cost_price) || 0, Number(p.sale_price) || 0, Number(p.wholesale_price) || 0, Number(p.quantity) || 0, Number(p.reorder_level) || 5, p.shelf_location || null]);
+          }
+          imported++;
+        }
+      }
+      if (Array.isArray(body.customers)) {
+        for (const c of body.customers) {
+          if (!c || !c.name) continue;
+          const existing = db.get('SELECT id FROM customers WHERE name = ? OR (phone IS NOT NULL AND phone = ?)', [c.name, c.phone || '']);
+          if (!existing) {
+            db.run('INSERT INTO customers (name, phone, address, created_at) VALUES (?, ?, ?, datetime(\'now\',\'localtime\'))', [c.name, c.phone || null, c.address || null]);
+          }
+        }
+      }
+      if (Array.isArray(body.suppliers)) {
+        for (const s of body.suppliers) {
+          if (!s || !s.name) continue;
+          const existing = db.get('SELECT id FROM suppliers WHERE name = ? OR (phone IS NOT NULL AND phone = ?)', [s.name, s.phone || '']);
+          if (!existing) {
+            db.run('INSERT INTO suppliers (name, phone, address, created_at) VALUES (?, ?, ?, datetime(\'now\',\'localtime\'))', [s.name, s.phone || null, s.address || null]);
+          }
+        }
+      }
+      db.logActivity(ctx.user.id, 'import', 'system_json', null, { imported });
+      ctx.res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      ctx.res.end(JSON.stringify({ ok: true, imported }));
+    });
   },
 };

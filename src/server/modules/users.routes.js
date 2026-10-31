@@ -3,21 +3,22 @@ const { sendJson, HttpError } = require('../core/http');
 const auth = require('../core/auth');
 const { pick, buildInsert, buildUpdate, list } = require('../core/crud');
 
-const FIELDS = ['username', 'full_name', 'role', 'phone', 'permissions'];
+const FIELDS = ['username', 'full_name', 'role', 'phone', 'permissions', 'branch'];
 
 module.exports = {
   register(router) {
     router.get('/api/users', (ctx) => {
       if (!ctx.can('admin.users')) throw new HttpError(403, 'لا تملك صلاحية الإدارة');
-      const { search, role, page = 1, page_size = 100 } = ctx.query;
+      const { search, role, branch, page = 1, page_size = 100 } = ctx.query;
       const where = [];
       const params = [];
       if (role) { where.push('role = ?'); params.push(role); }
+      if (branch) { where.push('branch = ?'); params.push(branch); }
       const limit = Math.min(Number(page_size) || 100, 500);
       const offset = (Math.max(Number(page) || 1, 1) - 1) * limit;
       const result = list('users', {
         where, params, order: 'id ASC', limit, offset,
-        search, searchCols: ['username', 'full_name', 'phone'],
+        search, searchCols: ['username', 'full_name', 'phone', 'branch'],
       });
       for (const row of result.rows) {
         row.permissions = (() => { try { return JSON.parse(row.permissions || '[]'); } catch { return []; } })();
@@ -34,14 +35,15 @@ module.exports = {
       if (exists) throw new HttpError(400, 'اسم المستخدم موجود مسبقاً');
       data.username = String(data.username).trim();
       data.role = data.role || 'cashier';
+      data.branch = data.branch || db.getSetting('active_branch', 'الفرع الرئيسي');
       data.permissions = JSON.stringify(Array.isArray(ctx.body.permissions) ? ctx.body.permissions : []);
       const { hash, salt } = db.hashPassword(password);
       const res = db.run(
-        `INSERT INTO users (username, full_name, password_hash, password_salt, role, permissions, phone)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [data.username, data.full_name, hash, salt, data.role, data.permissions, data.phone || null]
+        `INSERT INTO users (username, full_name, password_hash, password_salt, role, permissions, phone, branch)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [data.username, data.full_name, hash, salt, data.role, data.permissions, data.phone || null, data.branch]
       );
-      db.logActivity(ctx.user.id, 'create', 'users', res.lastInsertRowid, { username: data.username });
+      db.logActivity(ctx.user.id, 'create', 'users', res.lastInsertRowid, { username: data.username, branch: data.branch });
       sendJson(ctx.res, 201, { user: { id: res.lastInsertRowid, ...data, permissions: JSON.parse(data.permissions) } });
     });
 

@@ -9,6 +9,8 @@ const FIELDS = [
   'sku', 'barcode', 'part_number', 'name', 'author', 'description', 'category', 'brand',
   'unit', 'units', 'cost_price', 'sale_price', 'wholesale_price', 'quantity', 'reorder_level',
   'track_expiry', 'expiry_date', 'tax_rate', 'image', 'supplier_id', 'is_active',
+  'package_size', 'profit_margin_pct', 'wholesale_min_qty', 'shelf_location',
+  'is_meter_unit', 'meter_length', 'meter_width',
 ];
 
 function normalizeProduct(data) {
@@ -16,10 +18,10 @@ function normalizeProduct(data) {
   delete out.image;
   if (out.units && typeof out.units !== 'string') out.units = JSON.stringify(out.units);
   if ('supplier_id' in out && (out.supplier_id === '' || out.supplier_id === null)) out.supplier_id = null;
-  for (const k of ['track_expiry', 'is_active']) {
+  for (const k of ['track_expiry', 'is_active', 'is_meter_unit']) {
     if (k in out) out[k] = toBool(out[k]) ? 1 : 0;
   }
-  for (const k of ['cost_price', 'sale_price', 'wholesale_price', 'quantity', 'reorder_level', 'tax_rate']) {
+  for (const k of ['cost_price', 'sale_price', 'wholesale_price', 'quantity', 'reorder_level', 'tax_rate', 'profit_margin_pct', 'wholesale_min_qty', 'meter_length', 'meter_width']) {
     if (k in out) out[k] = Number(out[k]) || 0;
   }
   return out;
@@ -79,7 +81,7 @@ module.exports = {
       const order = allowedSort.includes(sort) ? sort : 'name ASC';
       const result = list('products', {
         where, params, order, limit, offset,
-        search, searchCols: ['name', 'barcode', 'sku', 'part_number', 'author', 'brand'],
+        search, searchCols: ['name', 'barcode', 'sku', 'part_number', 'author', 'brand', 'shelf_location', 'package_size'],
       });
       attachPrices(result.rows);
       sendJson(ctx.res, 200, result);
@@ -379,6 +381,45 @@ module.exports = {
       const res = db.run(`UPDATE products SET ${expr} ${where}`, params);
       db.logActivity(ctx.user.id, 'bulk_price', 'products', null, { field, mode, value, category });
       sendJson(ctx.res, 200, { ok: true, updated: res.changes });
+    });
+
+    router.post('/api/products/bulk-import', (ctx) => {
+      if (!ctx.can('inventory.write') && !ctx.can('products.write')) throw new HttpError(403, 'لا تملك صلاحية الاستيراد');
+      const items = Array.isArray(ctx.body.items) ? ctx.body.items : [];
+      if (!items.length) throw new HttpError(400, 'لا توجد بيانات للاستيراد');
+      let created = 0;
+      let updated = 0;
+      db.tx(() => {
+        for (const raw of items) {
+          const item = normalizeProduct(raw);
+          if (!item.name) continue;
+          let existing = null;
+          if (item.barcode) existing = db.get('SELECT * FROM products WHERE barcode = ?', [item.barcode]);
+          if (!existing && item.sku) existing = db.get('SELECT * FROM products WHERE sku = ?', [item.sku]);
+          if (!existing) existing = db.get('SELECT * FROM products WHERE name = ?', [item.name]);
+
+          if (existing) {
+            item.updated_at = db.get("SELECT datetime('now','localtime') AS t").t;
+            const { sql, values } = buildUpdate('products', existing.id, item);
+            db.run(sql, values);
+            if ('quantity' in item && Number(item.quantity) !== Number(existing.quantity)) {
+              const diff = Number(item.quantity) - Number(existing.quantity);
+              recordMovement(existing.id, diff > 0 ? 'in' : 'out', Math.abs(diff), Number(item.quantity), 'استيراد وتحديث المخزون', 'products', existing.id, ctx.user.id);
+            }
+            updated++;
+          } else {
+            const { sql, values } = buildInsert('products', item);
+            const res = db.run(sql, values);
+            const newId = Number(res.lastInsertRowid);
+            if (Number(item.quantity) > 0) {
+              recordMovement(newId, 'in', item.quantity, item.quantity, 'رصيد افتتاحي عبر الاستيراد', 'products', newId, ctx.user.id);
+            }
+            created++;
+          }
+        }
+      });
+      db.logActivity(ctx.user.id, 'bulk_import', 'products', null, { created, updated, total: items.length });
+      sendJson(ctx.res, 200, { ok: true, created, updated, total: items.length });
     });
   },
 };

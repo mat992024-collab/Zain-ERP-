@@ -110,6 +110,15 @@ async function enterApp() {
   document.getElementById('refreshBtn').onclick = () => navigate(currentRoute(), true);
   document.getElementById('themeBtn').onclick = () => toggleTheme();
   document.getElementById('searchBtn').onclick = () => openSearchPalette();
+  const bBtn = document.getElementById('branchSelectorBtn');
+  if (bBtn) bBtn.onclick = openBranchSelector;
+  const mBtn = document.getElementById('mobileSyncBtn');
+  if (mBtn) mBtn.onclick = openMobileSyncModal;
+  const oBtn = document.getElementById('ownerPinBtn');
+  if (oBtn) oBtn.onclick = openOwnerReportsModal;
+  const cBtn = document.getElementById('cloudSyncBtn');
+  if (cBtn) cBtn.onclick = openCloudSyncModal;
+  updateBranchBadge();
   window.onhashchange = () => navigate(currentRoute());
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
@@ -272,6 +281,225 @@ async function renderDashboard(c) {
         </table></div>
       </div>
     </div>`;
+}
+
+function currentBranch() {
+  return localStorage.getItem('zain_active_branch') || (state.user && state.user.branch) || state.settings.active_branch || 'فرع سموحة';
+}
+
+function updateBranchBadge() {
+  const el = document.getElementById('currentBranchName');
+  if (el) el.textContent = currentBranch();
+}
+
+function openBranchSelector() {
+  const raw = state.settings.branches || '["الفرع الرئيسي","فرع سموحة","فرع ميت غمر"]';
+  let list = ['الفرع الرئيسي', 'فرع سموحة', 'فرع ميت غمر'];
+  try { list = JSON.parse(raw); } catch {}
+  const cur = currentBranch();
+  modal({
+    title: 'تحديد فرع العمل النشط',
+    size: 'max-w-md',
+    body: `
+      <div class="space-y-3">
+        <div class="text-xs text-slate-500 mb-2">اختر الفرع الذي تعمل عليه لتسجيل الفواتير والورديات باسمه:</div>
+        <div class="space-y-2">
+          ${list.map((b) => `
+            <button data-branch="${esc(b)}" class="w-full p-3 rounded-xl border text-right font-bold flex items-center justify-between transition-all ${b === cur ? 'bg-indigo-50 border-indigo-400 text-indigo-700 shadow-sm' : 'bg-white border-slate-200 hover:bg-slate-50'}">
+              <span><i class="bi bi-geo-alt-fill text-indigo-500 ml-2"></i> ${esc(b)}</span>
+              ${b === cur ? '<span class="badge badge-ok">النشط حالياً</span>' : ''}
+            </button>
+          `).join('')}
+        </div>
+      </div>`,
+    footer: `<button data-cancel class="btn btn-ghost">إغلاق</button>`,
+    onMount(wrap, close) {
+      wrap.querySelectorAll('[data-branch]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const val = btn.dataset.branch;
+          localStorage.setItem('zain_active_branch', val);
+          state.activeBranch = val;
+          updateBranchBadge();
+          toast(`تم التبديل إلى ${val}`, 'success');
+          close();
+        });
+      });
+    },
+  });
+}
+
+async function openMobileSyncModal() {
+  let net = { port: 4782, mobile_url: `http://${location.hostname}:4782/`, preferred_ip: location.hostname };
+  try {
+    net = await api('GET', '/api/system/network-info');
+  } catch {}
+  modal({
+    title: 'المتابعة من الهاتف المحمول',
+    size: 'max-w-md',
+    body: `
+      <div class="space-y-4 text-center">
+        <div class="w-14 h-14 mx-auto grid place-items-center rounded-2xl bg-emerald-100 text-emerald-700 text-2xl">
+          <i class="bi bi-phone"></i>
+        </div>
+        <div>
+          <div class="font-black text-lg">لوحة المالك والمتابعة السريعة</div>
+          <p class="text-xs text-slate-500 mt-1">تأكد أن هاتفك متصل بنفس شبكة الواي فاي للكمبيوتر، ثم افتح الرابط التالي:</p>
+        </div>
+        <div class="card p-3 bg-slate-50 border border-slate-200">
+          <div class="text-xs text-slate-400 font-mono">رابط الوصول المحلي:</div>
+          <div class="font-mono font-black text-base text-indigo-700 select-all my-1" id="mobUrlText">${esc(net.mobile_url)}</div>
+          <button id="copyMobUrl" class="btn btn-ghost btn-sm mt-1"><i class="bi bi-clipboard"></i> نسخ الرابط</button>
+        </div>
+        <div class="p-3 rounded-xl bg-amber-50 text-amber-800 text-xs text-right space-y-1">
+          <div><i class="bi bi-check-circle-fill text-amber-600"></i> بدون إنترنت — يعمل بالكامل عبر شبكة الراوتر / الواي فاي المحلية.</div>
+          <div><i class="bi bi-shield-check text-amber-600"></i> متاح للمالك لمتابعة مبيعات فرع سموحة ومتغمر والمخزون مباشرة.</div>
+        </div>
+      </div>`,
+    footer: `<button data-cancel class="btn btn-primary w-full">تم</button>`,
+    onMount(wrap) {
+      wrap.querySelector('#copyMobUrl').addEventListener('click', () => {
+        navigator.clipboard.writeText(net.mobile_url);
+        toast('تم نسخ الرابط بنجاح', 'success');
+      });
+    },
+  });
+}
+
+async function openOwnerReportsModal() {
+  let pin = '';
+  if (state.user && state.user.role !== 'admin' && !hasPerm('*')) {
+    pin = prompt('أدخل الرقم السري للمالك (PIN):');
+    if (!pin) return;
+  }
+  let data;
+  try {
+    data = await api('GET', `/api/reports/owner-summary${pin ? `?pin=${encodeURIComponent(pin)}` : ''}`);
+  } catch (err) {
+    toast(err.message || 'غير مصرح بالاطلاع على أرباح المالك', 'error');
+    return;
+  }
+  const s = data.summary || {};
+  modal({
+    title: 'تقارير المالك السرية — الأرباح والسيولة',
+    size: 'max-w-xl',
+    body: `
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="card p-4 bg-emerald-50 border border-emerald-200 text-center">
+            <div class="text-xs font-bold text-emerald-600">صافي ربح النشاط</div>
+            <div class="text-2xl font-black text-emerald-800 mt-1">${money(s.net_profit)}</div>
+            <div class="text-[11px] text-emerald-600 mt-0.5">هامش الربح: ${s.margin_pct || 0}%</div>
+          </div>
+          <div class="card p-4 bg-indigo-50 border border-indigo-200 text-center">
+            <div class="text-xs font-bold text-indigo-600">إجمالي المبيعات</div>
+            <div class="text-2xl font-black text-indigo-800 mt-1">${money(s.total_revenue)}</div>
+            <div class="text-[11px] text-indigo-600 mt-0.5">${num(s.sales_count)} فاتورة بيع</div>
+          </div>
+        </div>
+        <div class="card p-3">
+          <div class="font-bold text-xs text-slate-500 mb-2">توزيع السيولة النقدية والمحافظ الإلكترونية:</div>
+          <div class="grid grid-cols-4 gap-2 text-center text-xs">
+            ${(data.payments || []).map((p) => {
+              const label = { cash: 'نقدي', vodafone_cash: 'فودافون كاش', card: 'بطاقات', wallet: 'محفظة' }[p.method] || p.method;
+              const isVodafone = p.method === 'vodafone_cash';
+              return `
+                <div class="p-2 rounded-lg ${isVodafone ? 'bg-red-50 text-red-700 font-bold border border-red-200' : 'bg-slate-50 text-slate-700'}">
+                  <div>${esc(label)}</div>
+                  <div class="font-black text-sm mt-0.5">${money(p.amount)}</div>
+                </div>`;
+            }).join('')}
+          </div>
+        </div>
+        <div class="card p-3">
+          <div class="font-bold text-xs text-slate-500 mb-2">حجم المبيعات حسب الفرع (سموحة / متغمر / الرئيسي):</div>
+          <div class="space-y-1.5">
+            ${(data.branches || []).map((b) => `
+              <div class="flex items-center justify-between p-2 rounded-lg bg-slate-50 text-xs">
+                <span class="font-bold"><i class="bi bi-geo-alt-fill text-indigo-500 ml-1"></i> ${esc(b.branch)}</span>
+                <span class="text-slate-500">${num(b.count)} عملية</span>
+                <span class="font-black text-indigo-700">${money(b.total)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>`,
+    footer: `<button data-cancel class="btn btn-primary w-full">إغلاق</button>`,
+  });
+}
+
+async function openCloudSyncModal() {
+  let status = { enabled: false, url: '', status: 'idle', pending: 0, synced: 0, failed: 0 };
+  try {
+    status = await api('GET', '/api/sync/status');
+  } catch {}
+  modal({
+    title: 'المزامنة السحابية للفروع (Cloud Sync)',
+    size: 'max-w-md',
+    body: `
+      <div class="space-y-4 text-center">
+        <div class="w-16 h-16 rounded-2xl bg-cyan-100 text-cyan-700 grid place-items-center text-3xl mx-auto shadow-sm">
+          <i class="bi bi-cloud-arrow-up"></i>
+        </div>
+        <div>
+          <div class="font-black text-lg">محرك المزامنة السحابية للفروع</div>
+          <p class="text-xs text-slate-500 mt-1">نظام Offline-First: يبيع بدون إنترنت وعند توفر الشبكة يزامن البيانات تلقائياً مع السيرفر المركزي وفروع سموحة ومتغمر.</p>
+        </div>
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div class="card p-2 bg-amber-50 border border-amber-200">
+            <div class="text-[11px] text-amber-600 font-bold">بانتظار المزامنة</div>
+            <div class="text-lg font-black text-amber-700" id="syncPendingCount">${num(status.pending)}</div>
+          </div>
+          <div class="card p-2 bg-emerald-50 border border-emerald-200">
+            <div class="text-[11px] text-emerald-600 font-bold">تمت مزامنته</div>
+            <div class="text-lg font-black text-emerald-700">${num(status.synced)}</div>
+          </div>
+          <div class="card p-2 bg-slate-50 border border-slate-200">
+            <div class="text-[11px] text-slate-500 font-bold">الحالة</div>
+            <div class="text-sm font-bold text-slate-700 mt-1">${status.status === 'synced' ? 'متزامن' : status.status === 'offline' ? 'أوفلاين' : 'جاهز'}</div>
+          </div>
+        </div>
+        <div class="text-right space-y-2 card p-3 bg-slate-50 border border-slate-200">
+          <label class="label text-xs font-bold text-slate-600">عنوان السيرفر السحابي (Supabase / REST Endpoint):</label>
+          <input id="syncCloudUrl" value="${esc(status.url || '')}" class="field font-mono text-xs" placeholder="https://api.yourcloud.com/sync" />
+          <div class="flex gap-2 mt-2">
+            <button id="saveSyncConfig" class="btn btn-ghost btn-sm flex-1"><i class="bi bi-floppy"></i> حفظ الإعدادات</button>
+            <button id="triggerSyncNow" class="btn btn-primary btn-sm flex-1"><i class="bi bi-arrow-repeat"></i> مزامنة الآن</button>
+          </div>
+        </div>
+      </div>`,
+    footer: `<button data-cancel class="btn btn-ghost w-full">إغلاق</button>`,
+    onMount(wrap, close) {
+      wrap.querySelector('#saveSyncConfig').addEventListener('click', async () => {
+        const url = wrap.querySelector('#syncCloudUrl').value.trim();
+        try {
+          await api('POST', '/api/sync/config', { url, enabled: !!url });
+          toast('تم حفظ إعدادات السيرفر السحابي', 'success');
+        } catch (e) {
+          toast(e.message, 'error');
+        }
+      });
+      wrap.querySelector('#triggerSyncNow').addEventListener('click', async () => {
+        const btn = wrap.querySelector('#triggerSyncNow');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-arrow-clockwise animate-spin"></i> جاري المزامنة...';
+        try {
+          const res = await api('POST', '/api/sync/trigger');
+          if (res.ok) {
+            toast(`تمت المزامنة بنجاح (${res.synced} عنصر)`, 'success');
+            const pendingEl = wrap.querySelector('#syncPendingCount');
+            if (pendingEl) pendingEl.textContent = String(res.pending || 0);
+          } else {
+            toast(res.error || 'تعذر الاتصال بالسيرفر السحابي (العمل مستمر أوفلاين)', 'warning');
+          }
+        } catch (e) {
+          toast(e.message, 'error');
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> مزامنة الآن';
+        }
+      });
+    },
+  });
 }
 
 window.ZainApp = { navigate, enterApp, state };

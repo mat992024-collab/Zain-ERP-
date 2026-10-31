@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_salt TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'cashier',
   permissions TEXT NOT NULL DEFAULT '[]',
+  branch TEXT DEFAULT 'الفرع الرئيسي',
   phone TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   last_login TEXT,
@@ -34,6 +35,13 @@ CREATE TABLE IF NOT EXISTS products (
   brand TEXT,
   unit TEXT NOT NULL DEFAULT 'قطعة',
   units TEXT NOT NULL DEFAULT '[]',
+  package_size TEXT,
+  is_meter_unit INTEGER NOT NULL DEFAULT 0,
+  meter_length REAL DEFAULT 0,
+  meter_width REAL DEFAULT 0,
+  profit_margin_pct REAL NOT NULL DEFAULT 0,
+  wholesale_min_qty REAL NOT NULL DEFAULT 1,
+  shelf_location TEXT,
   cost_price REAL NOT NULL DEFAULT 0,
   sale_price REAL NOT NULL DEFAULT 0,
   wholesale_price REAL NOT NULL DEFAULT 0,
@@ -93,7 +101,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
 CREATE TABLE IF NOT EXISTS shifts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
-  branch TEXT DEFAULT 'main',
+  branch TEXT DEFAULT 'الفرع الرئيسي',
   opened_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   closed_at TEXT,
   opening_balance REAL NOT NULL DEFAULT 0,
@@ -103,6 +111,7 @@ CREATE TABLE IF NOT EXISTS shifts (
   total_cash REAL NOT NULL DEFAULT 0,
   total_card REAL NOT NULL DEFAULT 0,
   total_wallet REAL NOT NULL DEFAULT 0,
+  total_vodafone_cash REAL NOT NULL DEFAULT 0,
   total_credit REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'open',
   notes TEXT,
@@ -114,6 +123,10 @@ CREATE TABLE IF NOT EXISTS invoices (
   invoice_no TEXT NOT NULL UNIQUE,
   type TEXT NOT NULL DEFAULT 'sale',
   pos_mode TEXT NOT NULL DEFAULT 'retail',
+  order_type TEXT NOT NULL DEFAULT 'direct',
+  delivery_status TEXT NOT NULL DEFAULT 'completed',
+  delivery_notes TEXT,
+  branch TEXT DEFAULT 'الفرع الرئيسي',
   customer_id INTEGER,
   supplier_id INTEGER,
   user_id INTEGER,
@@ -146,6 +159,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   name TEXT NOT NULL,
   qty REAL NOT NULL DEFAULT 1,
   unit TEXT DEFAULT 'قطعة',
+  dimensions TEXT,
   unit_price REAL NOT NULL DEFAULT 0,
   cost_price REAL NOT NULL DEFAULT 0,
   discount REAL NOT NULL DEFAULT 0,
@@ -383,6 +397,20 @@ CREATE TABLE IF NOT EXISTS scheduled_invoices (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS sync_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity TEXT NOT NULL,
+  entity_id INTEGER,
+  action TEXT NOT NULL,
+  payload TEXT NOT NULL DEFAULT '{}',
+  branch TEXT NOT NULL DEFAULT 'الفرع الرئيسي',
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  synced_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at);
@@ -392,6 +420,7 @@ CREATE INDEX IF NOT EXISTS idx_invoice_items_product ON invoice_items(product_id
 CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
 CREATE INDEX IF NOT EXISTS idx_treasury_created ON treasury(created_at);
 CREATE INDEX IF NOT EXISTS idx_account_entries_account ON account_entries(account_id);
+CREATE INDEX IF NOT EXISTS idx_sync_queue_status ON sync_queue(status);
 `;
 
 const DEFAULT_SETTINGS = [
@@ -467,9 +496,38 @@ const DEFAULT_SETTINGS = [
   ["zakat_gold_price", "0", "financial"],
   ["zakat_include_receivables", "1", "financial"],
   ["zakat_include_liabilities", "1", "financial"],
+  ["return_policy_max_days", "14", "financial"],
+  ["eta_enabled", "0", "integration"],
+  ["eta_client_id", "", "integration"],
+  ["eta_client_secret", "", "integration"],
+  ["eta_environment", "preproduction", "integration"],
+  ["whatsapp_enabled", "0", "integration"],
+  ["whatsapp_phone_number_id", "", "integration"],
+  ["whatsapp_token", "", "integration"],
+  ["cloud_backup_enabled", "0", "backup"],
+  ["cloud_backup_webhook_url", "", "backup"],
+  ["cloud_backup_last", "", "backup"],
+  ["cloud_backup_error", "", "backup"],
+  ["branches", "[\"الفرع الرئيسي\", \"فرع سموحة\", \"فرع ميت غمر\"]", "general"],
+  ["active_branch", "فرع سموحة", "general"],
+  ["vodafone_cash_phone", "01000000000", "financial"],
+  ["owner_pin", "1234", "security"],
+  ["mobile_sync_enabled", "1", "integration"],
+  ["cloud_sync_enabled", "0", "integration"],
+  ["cloud_sync_url", "", "integration"],
+  ["cloud_sync_api_key", "", "integration"],
+  ["cloud_sync_interval", "30", "integration"],
+  ["cloud_sync_last_run", "", "integration"],
+  ["cloud_sync_status", "idle", "integration"],
 ];
 
 const INDUSTRY_PRESETS = {
+  printing_press: {
+    label: "مطابع ودعاية وإعلان",
+    product_fields: ["barcode", "unit", "category"],
+    pos_mode: "retail",
+    modules: ["pos", "inventory", "accounting", "customers", "ai"],
+  },
   supermarket: {
     label: "سوبرماركت",
     product_fields: ["barcode", "unit", "expiry_date", "category"],

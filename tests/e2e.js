@@ -10,8 +10,8 @@ const { start } = require('../src/server/index.js');
 const { readZip } = require('../src/server/core/zip');
 
 (async () => {
-  const { server, port } = await start(4202);
-  const base = `http://127.0.0.1:${port}`;
+  const { server, port, host } = await start(4202);
+  const base = `http://${host || '127.0.41.80'}:${port}`;
   const raw = (path, opts = {}) => fetch(base + path, opts);
   const call = async (method, path, body, token) => {
     const res = await fetch(base + path, {
@@ -945,6 +945,20 @@ const { readZip } = require('../src/server/core/zip');
   ok('invalid scale mode rejected (400)', r.status === 400, String(r.status));
   await call('PUT', '/api/settings', { scale_enabled: 0 }, token);
 
+  r = await call('GET', '/api/sync/status', null, token);
+  ok('cloud sync status returns queue stats', r.status === 200 && typeof r.data.pending === 'number', String(r.status));
+
+  r = await call('POST', '/api/sync/config', { enabled: true, url: 'http://127.0.0.1:9999/dummy-sync', interval: 60 }, token);
+  ok('cloud sync config updated', r.status === 200 && r.data.ok === true, String(r.status));
+
+  r = await call('POST', '/api/sync/trigger', null, token);
+  ok('cloud sync trigger handles offline safely', r.status === 200 || r.status === 400, String(r.status));
+
+  r = await call('POST', '/api/sync/receive', { items: [{ entity: 'products', data: { name: 'صنف فرع سموحة سحابي', barcode: 'SYNC-881', sale_price: 1500 } }] }, token);
+  ok('cloud sync receive applies inbound data', r.status === 200 && r.data.received === 1, String(r.status));
+
+  r = await call('GET', '/api/sync/queue', null, token);
+  ok('cloud sync queue listed', r.status === 200 && Array.isArray(r.data.rows), String(r.status));
 
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);

@@ -63,6 +63,11 @@ table { border-collapse: separate; border-spacing: 0; }
 .btn:active:not(:disabled) { transform: scale(0.98); }
 .btn-primary { background: #4f46e5; color: white; box-shadow: 0 10px 15px -3px rgb(99 102 241 / 0.25); }
 .btn-primary:hover { background: #4338ca; }
+#auth .card { background: #ffffff !important; border: 2px solid #94a3af !important; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2) !important; }
+#auth .field { background: #ffffff !important; border: 2px solid #9ca3af !important; color: #0f172a !important; }
+#auth .field:focus { border-color: #1d4ed8 !important; box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.25) !important; }
+#auth .btn-primary { background: #1d4ed8 !important; border: 2px solid #1e40af !important; color: #ffffff !important; box-shadow: 0 4px 14px rgba(29, 78, 216, 0.45) !important; }
+#auth .btn-primary:hover { background: #1e40af !important; border-color: #172554 !important; }
 .btn-ghost { background: var(--surface); color: var(--text-2); border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--surface-2); }
 .btn-success { background: #10b981; color: white; }

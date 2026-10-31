@@ -39,5 +39,14 @@ module.exports = {
       db.logActivity(ctx.user.id, 'change_password', 'users', ctx.user.id);
       sendJson(ctx.res, 200, { ok: true });
     });
+
+    router.post('/api/auth/verify-manager', (ctx) => {
+      const { password } = ctx.body || {};
+      if (!password) throw new HttpError(400, 'كلمة المرور مطلوبة');
+      const managers = db.all("SELECT * FROM users WHERE role = 'admin' AND is_active = 1");
+      const ok = managers.some((m) => db.verifyPassword(password, m.password_salt, m.password_hash));
+      if (!ok) throw new HttpError(403, 'كلمة مرور المدير غير صحيحة');
+      sendJson(ctx.res, 200, { ok: true });
+    });
   },
 };

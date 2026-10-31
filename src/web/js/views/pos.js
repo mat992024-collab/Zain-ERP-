@@ -25,6 +25,17 @@ async function loadCurrencies() {
 export async function render(c) {
   state.cart = [];
   state.cartMeta = { customer_id: '', pos_mode: state.settings.default_pos_mode || 'fast', payment_method: 'cash', discount: 0, tax: 0, paid: '' };
+  const autoSaved = localStorage.getItem('zain_auto_suspended_cart');
+  if (autoSaved) {
+    try {
+      const parsed = JSON.parse(autoSaved);
+      if (Array.isArray(parsed.cart) && parsed.cart.length) {
+        state.cart = parsed.cart;
+        if (parsed.cartMeta) state.cartMeta = { ...state.cartMeta, ...parsed.cartMeta };
+      }
+    } catch {}
+    localStorage.removeItem('zain_auto_suspended_cart');
+  }
   [products, customers] = await Promise.all([
     api('GET', '/api/products?page_size=300').then((r) => r.rows).catch(() => []),
     api('GET', '/api/customers?page_size=300').then((r) => r.rows).catch(() => []),
@@ -142,9 +153,46 @@ export async function render(c) {
   updateSuspendCount();
   setTimeout(() => search.focus(), 100);
 
+  const saveAuto = () => {
+    try {
+      if (state.cart && state.cart.length) {
+        localStorage.setItem('zain_auto_suspended_cart', JSON.stringify({ cart: state.cart, cartMeta: state.cartMeta }));
+      } else {
+        localStorage.removeItem('zain_auto_suspended_cart');
+      }
+    } catch {}
+  };
+  window.addEventListener('beforeunload', saveAuto);
   if (window.__posCleanup) window.__posCleanup();
   document.addEventListener('keydown', globalScan);
-  window.__posCleanup = () => document.removeEventListener('keydown', globalScan);
+  window.__posCleanup = () => {
+    document.removeEventListener('keydown', globalScan);
+    window.removeEventListener('beforeunload', saveAuto);
+    saveAuto();
+  };
+}
+
+function playScanBeep(success = true) {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = success ? 'sine' : 'sawtooth';
+    osc.frequency.setValueAtTime(success ? 1760 : 440, ctx.currentTime);
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + (success ? 0.08 : 0.2));
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + (success ? 0.09 : 0.22));
+  } catch {}
+}
+
+function openCashDrawer() {
+  playScanBeep(true);
+  toast('تم فتح الدرج النقدي', 'info');
 }
 
 function globalScan(e) {
@@ -152,11 +200,48 @@ function globalScan(e) {
   const target = e.target;
   const tag = target && target.tagName ? target.tagName.toLowerCase() : '';
   const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || (target && target.isContentEditable);
-  if (e.key === 'F9') { e.preventDefault(); openPayment(); return; }
-  if (e.key === 'F1' || e.key === 'F2') { e.preventDefault(); focusSearch(); return; }
+  if (e.key === 'F1') { e.preventDefault(); focusSearch(); return; }
+  if (e.key === 'F2') {
+    e.preventDefault();
+    const sel = document.getElementById('posMode');
+    if (sel) {
+      sel.value = sel.value === 'wholesale' ? 'fast' : 'wholesale';
+      state.cartMeta.pos_mode = sel.value;
+      toast(sel.value === 'wholesale' ? 'وضع البيع بالجملة' : 'وضع البيع السريع', 'info');
+      renderCart();
+    }
+    return;
+  }
   if (e.key === 'F3') { e.preventDefault(); suspendCart(); return; }
   if (e.key === 'F4') { e.preventDefault(); openSuspended(); return; }
   if (e.key === 'F5') { e.preventDefault(); repeatLastSale(); return; }
+  if (e.key === 'F6') {
+    e.preventDefault();
+    const disc = document.getElementById('posDiscount');
+    if (disc) { disc.focus(); disc.select(); }
+    return;
+  }
+  if (e.key === 'F7') {
+    e.preventDefault();
+    const clearBtn = document.getElementById('clearCart');
+    if (clearBtn) clearBtn.click();
+    return;
+  }
+  if (e.key === 'F8') {
+    e.preventDefault();
+    const cust = document.getElementById('posCustomer');
+    if (cust) cust.focus();
+    return;
+  }
+  if (e.key === 'F9') { e.preventDefault(); openPayment(); return; }
+  if (e.key === 'F10') { e.preventDefault(); openCashDrawer(); return; }
+  if (e.key === 'F11') {
+    e.preventDefault();
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+    else document.exitFullscreen().catch(() => {});
+    return;
+  }
+  if (e.key === 'F12') { e.preventDefault(); repeatLastSale(); return; }
   if (e.key === 'Escape' && target && target.id === 'posSearch') { target.value = ''; renderGrid(''); return; }
   if (!typing && e.key.length === 1) {
     const now = Date.now();
@@ -265,17 +350,17 @@ export function addByCode(code) {
   const scale = parseScaleCode(code);
   if (scale) {
     const p = findScaleProduct(scale);
-    if (p) { addScaleProduct(p, scale); return; }
+    if (p) { playScanBeep(true); addScaleProduct(p, scale); return; }
     api('GET', `/api/products/barcode/${encodeURIComponent(code)}`)
-      .then((r) => { products.unshift(r.product); addScaleProduct(r.product, scale); })
-      .catch(() => toast('لم يتم العثور على صنف باركود الميزان', 'error'));
+      .then((r) => { playScanBeep(true); products.unshift(r.product); addScaleProduct(r.product, scale); })
+      .catch(() => { playScanBeep(false); toast('لم يتم العثور على صنف باركود الميزان', 'error'); });
     return;
   }
   const p = products.find((x) => String(x.barcode) === String(code) || String(x.part_number) === String(code));
-  if (p) { addProduct(p); toast(`أضيف: ${p.name}`, 'success'); return; }
+  if (p) { playScanBeep(true); addProduct(p); toast(`أضيف: ${p.name}`, 'success'); return; }
   api('GET', `/api/products/barcode/${encodeURIComponent(code)}`)
-    .then((r) => { products.unshift(r.product); addProduct(r.product); toast(`أضيف: ${r.product.name}`, 'success'); })
-    .catch(() => toast('لم يتم العثور على الصنف', 'error'));
+    .then((r) => { playScanBeep(true); products.unshift(r.product); addProduct(r.product); toast(`أضيف: ${r.product.name}`, 'success'); })
+    .catch(() => { playScanBeep(false); toast('لم يتم العثور على الصنف', 'error'); });
 }
 
 function parseScaleCode(code) {
@@ -324,9 +409,11 @@ function addScaleProduct(p, scale) {
   toast(`أضيف: ${p.name} — ${scale.mode === 'weight' ? roundTo(scale.value, 3) : money(scale.value)}`, 'success');
 }
 
-function priceFor(p) {
+function priceFor(p, qty = 1) {
   const mode = state.cartMeta.pos_mode;
-  if (mode === 'wholesale' && Number(p.wholesale_price)) return Number(p.wholesale_price);
+  const hasWholesale = Number(p.wholesale_price) > 0;
+  const minQty = Number(p.wholesale_min_qty) || 1;
+  if (hasWholesale && (mode === 'wholesale' || (qty >= minQty && minQty > 1))) return Number(p.wholesale_price);
   return Number(p.sale_price);
 }
 
@@ -346,23 +433,87 @@ function foreignChips(p) {
   }).join('')}</div>`;
 }
 
+function openMeterModal(p) {
+  modal({
+    title: `حساب الأمتار والمساحة: ${esc(p.name)}`,
+    size: 'max-w-sm',
+    body: `
+      <div class="space-y-3">
+        <div class="bg-indigo-50 p-3 rounded-xl text-xs text-indigo-700">
+          سعر المتر: <b>${money(p.sale_price)}</b> | الوحدة: <b>${esc(p.unit)}</b>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          ${field('الطول (متر)', '<input id="mMtrLen" type="number" step="0.01" value="1" class="field font-bold" />')}
+          ${field('العرض (متر)', '<input id="mMtrWid" type="number" step="0.01" value="1" class="field font-bold" />')}
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          ${field('العدد / القطع', '<input id="mMtrCount" type="number" step="1" value="1" class="field font-bold" />')}
+          ${field('إجمالي المساحة (م²)', '<input id="mMtrTotalArea" type="number" step="0.01" value="1" class="field font-bold bg-slate-50" readonly />')}
+        </div>
+      </div>`,
+    footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="mMtrAdd" class="btn btn-primary"><i class="bi bi-plus-circle"></i> إضافة للسلة</button>`,
+    onMount(wrap, close) {
+      const lIn = wrap.querySelector('#mMtrLen');
+      const wIn = wrap.querySelector('#mMtrWid');
+      const cIn = wrap.querySelector('#mMtrCount');
+      const tot = wrap.querySelector('#mMtrTotalArea');
+      const calc = () => {
+        const l = Number(lIn.value) || 0;
+        const w = Number(wIn.value) || 0;
+        const count = Number(cIn.value) || 1;
+        tot.value = roundTo(l * w * count, 3);
+      };
+      [lIn, wIn, cIn].forEach((el) => el.addEventListener('input', calc));
+      wrap.querySelector('#mMtrAdd').addEventListener('click', () => {
+        const l = Number(lIn.value) || 0;
+        const w = Number(wIn.value) || 0;
+        const count = Number(cIn.value) || 1;
+        const area = roundTo(l * w * count, 3) || 1;
+        state.cart.push({
+          product_id: p.id,
+          name: p.name,
+          unit: p.unit,
+          qty: area,
+          dimensions: `${l}م × ${w}م (${count} ق)`,
+          unit_price: priceFor(p, area),
+          cost_price: p.cost_price,
+          discount: 0,
+          tax_rate: Number(p.tax_rate) || 0,
+          stock: Number(p.quantity),
+        });
+        playScanBeep(true);
+        renderCart();
+        close();
+      });
+    },
+  });
+}
+
 export function addProduct(p) {
   if (!p) return;
   const stock = Number(p.quantity);
   if (Number.isFinite(stock) && stock <= 0) {
+    playScanBeep(false);
     toast(`نفد مخزون: ${p.name}`, 'error');
     return;
   }
-  const existing = state.cart.find((i) => i.product_id === p.id);
+  if (p.is_meter_unit || p.unit === 'متر' || p.unit === 'متر مربع') {
+    openMeterModal(p);
+    return;
+  }
+  const existing = state.cart.find((i) => i.product_id === p.id && !i.dimensions);
   if (existing) {
     if (Number.isFinite(stock) && existing.qty + 1 > stock) {
+      playScanBeep(false);
       toast(`الكمية المتاحة من ${p.name} هي ${stock}`, 'error');
       return;
     }
     existing.qty += 1;
+    if (!existing.manual_price) existing.unit_price = priceFor(p, existing.qty);
   } else {
-    state.cart.push({ product_id: p.id, name: p.name, unit: p.unit, qty: 1, unit_price: priceFor(p), cost_price: p.cost_price, discount: 0, tax_rate: Number(p.tax_rate) || 0, stock });
+    state.cart.push({ product_id: p.id, name: p.name, unit: p.unit, qty: 1, unit_price: priceFor(p, 1), cost_price: p.cost_price, discount: 0, tax_rate: Number(p.tax_rate) || 0, stock });
   }
+  playScanBeep(true);
   renderCart();
 }
 
@@ -379,6 +530,7 @@ function renderCart() {
       <div class="card p-3 flex items-center gap-3">
         <div class="flex-1 min-w-0">
           <div class="font-bold text-sm truncate">${esc(i.name)}</div>
+          ${i.dimensions ? `<div class="text-[11px] text-indigo-600 font-bold mt-0.5"><i class="bi bi-rulers"></i> ${esc(i.dimensions)}</div>` : ''}
           <div class="flex items-center gap-2 mt-1">
             <input type="number" value="${i.unit_price}" data-price="${idx}" class="field !py-1 !px-2 !w-24 text-xs" />
             <input type="number" value="${i.discount}" data-disc="${idx}" class="field !py-1 !px-2 !w-16 text-xs" placeholder="خصم" />
@@ -393,12 +545,57 @@ function renderCart() {
         <button data-del="${idx}" class="text-rose-400 hover:text-rose-600"><i class="bi bi-x-lg"></i></button>
       </div>`)
     .join('');
-  box.querySelectorAll('[data-qty]').forEach((el) => el.addEventListener('change', (e) => { const it = state.cart[+e.target.dataset.qty]; const min = it.scale ? 0.001 : 1; it.qty = Math.max(min, Number(e.target.value) || min); renderCart(); }));
-  box.querySelectorAll('[data-price]').forEach((el) => el.addEventListener('change', (e) => { state.cart[+e.target.dataset.price].unit_price = Number(e.target.value) || 0; renderCart(); }));
+  box.querySelectorAll('[data-qty]').forEach((el) => el.addEventListener('change', (e) => {
+    const it = state.cart[+e.target.dataset.qty];
+    const min = it.scale ? 0.001 : 1;
+    it.qty = Math.max(min, Number(e.target.value) || min);
+    const prod = products.find((x) => x.id === it.product_id);
+    if (prod && !it.manual_price) it.unit_price = priceFor(prod, it.qty);
+    renderCart();
+  }));
+  box.querySelectorAll('[data-price]').forEach((el) => el.addEventListener('change', async (e) => {
+    const idx = +e.target.dataset.price;
+    const item = state.cart[idx];
+    const oldVal = item.unit_price;
+    const newVal = Number(e.target.value) || 0;
+    if (newVal !== oldVal && state.user && state.user.role === 'cashier') {
+      const pin = prompt('تعديل السعر يتطلب كلمة مرور المدير:');
+      if (!pin) { e.target.value = oldVal; return; }
+      try {
+        await api('POST', '/api/auth/verify-manager', { password: pin });
+      } catch {
+        toast('كلمة مرور المدير غير صحيحة', 'error');
+        e.target.value = oldVal;
+        return;
+      }
+    }
+    item.unit_price = newVal;
+    item.manual_price = true;
+    renderCart();
+  }));
   box.querySelectorAll('[data-disc]').forEach((el) => el.addEventListener('change', (e) => { state.cart[+e.target.dataset.disc].discount = Number(e.target.value) || 0; renderCart(); }));
-  box.querySelectorAll('[data-plus]').forEach((el) => el.addEventListener('click', () => { const it = state.cart[+el.dataset.plus]; if (it.scale) it.qty = roundTo(it.qty + 0.1, 3); else it.qty += 1; renderCart(); }));
-  box.querySelectorAll('[data-minus]').forEach((el) => el.addEventListener('click', () => { const it = state.cart[+el.dataset.minus]; if (it.scale) it.qty = Math.max(0.001, roundTo(it.qty - 0.1, 3)); else it.qty = Math.max(1, it.qty - 1); renderCart(); }));
-  box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', () => { state.cart.splice(+el.dataset.del, 1); renderCart(); }));
+  box.querySelectorAll('[data-plus]').forEach((el) => el.addEventListener('click', () => {
+    const it = state.cart[+el.dataset.plus];
+    if (it.scale) it.qty = roundTo(it.qty + 0.1, 3);
+    else it.qty += 1;
+    const prod = products.find((x) => x.id === it.product_id);
+    if (prod && !it.manual_price) it.unit_price = priceFor(prod, it.qty);
+    renderCart();
+  }));
+  box.querySelectorAll('[data-minus]').forEach((el) => el.addEventListener('click', () => {
+    const it = state.cart[+el.dataset.minus];
+    if (it.scale) it.qty = Math.max(0.001, roundTo(it.qty - 0.1, 3));
+    else it.qty = Math.max(1, it.qty - 1);
+    const prod = products.find((x) => x.id === it.product_id);
+    if (prod && !it.manual_price) it.unit_price = priceFor(prod, it.qty);
+    renderCart();
+  }));
+  box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', async () => {
+    if (await confirmBox('هل أنت متأكد من حذف هذا الصنف من السلة؟')) {
+      state.cart.splice(+el.dataset.del, 1);
+      renderCart();
+    }
+  }));
   updateTotals();
 }
 
@@ -599,6 +796,7 @@ function openPaymentModal(t) {
         <label class="label">طريقة الدفع</label>
         <div class="grid grid-cols-3 gap-2" id="pmRow">
           <button data-pm="cash" class="pm-btn btn btn-primary">نقدي</button>
+          <button data-pm="vodafone_cash" class="pm-btn btn btn-ghost text-red-600 font-bold"><i class="bi bi-phone"></i> فودافون كاش</button>
           <button data-pm="card" class="pm-btn btn btn-ghost">بطاقة</button>
           <button data-pm="wallet" class="pm-btn btn btn-ghost">محفظة</button>
           <button data-pm="credit" class="pm-btn btn btn-ghost">آجل</button>
@@ -609,8 +807,9 @@ function openPaymentModal(t) {
         ${field('المبلغ المدفوع', `<input id="payAmount" type="number" value="${t.total}" class="field !text-lg font-bold" />`)}
       </div>
       <div id="mixedPay" class="hidden">
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-2 gap-2">
           ${field('نقدي', `<input id="payCash" type="number" step="0.01" value="${t.total}" class="field font-bold" />`)}
+          ${field('فودافون كاش', `<input id="payVodafone" type="number" step="0.01" value="0" class="field font-bold text-red-600" />`)}
           ${field('بطاقة', `<input id="payCard" type="number" step="0.01" value="0" class="field font-bold" />`)}
           ${field('محفظة', `<input id="payWallet" type="number" step="0.01" value="0" class="field font-bold" />`)}
         </div>
@@ -629,6 +828,7 @@ function openPaymentModal(t) {
       const mixedBox = wrap.querySelector('#mixedPay');
       const amount = wrap.querySelector('#payAmount');
       const cashIn = wrap.querySelector('#payCash');
+      const vodafoneIn = wrap.querySelector('#payVodafone');
       const cardIn = wrap.querySelector('#payCard');
       const walletIn = wrap.querySelector('#payWallet');
       const changeBox = wrap.querySelector('#changeBox');
@@ -666,7 +866,7 @@ function openPaymentModal(t) {
         const c = curOf();
         return isForeign() ? (c.symbol || c.code) : (state.settings.currency_symbol || 'د.ع');
       };
-      const mixedPaid = () => roundTo((Number(cashIn.value) || 0) + (Number(cardIn.value) || 0) + (Number(walletIn.value) || 0), curOf().decimals);
+      const mixedPaid = () => roundTo((Number(cashIn.value) || 0) + (Number(vodafoneIn ? vodafoneIn.value : 0) || 0) + (Number(cardIn.value) || 0) + (Number(walletIn.value) || 0), curOf().decimals);
       const update = () => {
         const cur = curOf();
         const totalF = totalIn();
@@ -704,6 +904,7 @@ function openPaymentModal(t) {
         mixedBox.classList.toggle('hidden', method !== 'mixed');
         if (method === 'mixed') {
           cashIn.value = totalIn();
+          if (vodafoneIn) vodafoneIn.value = 0;
           cardIn.value = 0;
           walletIn.value = 0;
         } else if (method === 'credit') {
@@ -714,11 +915,11 @@ function openPaymentModal(t) {
         update();
       };
       amount.addEventListener('input', update);
-      [cashIn, cardIn, walletIn].forEach((el) => el.addEventListener('input', update));
+      [cashIn, vodafoneIn, cardIn, walletIn].filter(Boolean).forEach((el) => el.addEventListener('input', update));
       const fillBtn = wrap.querySelector('#payFill');
       if (fillBtn) fillBtn.addEventListener('click', () => {
         const totalF = totalIn();
-        const others = roundTo((Number(cardIn.value) || 0) + (Number(walletIn.value) || 0), 2);
+        const others = roundTo((Number(cardIn.value) || 0) + (Number(walletIn.value) || 0) + (Number(vodafoneIn ? vodafoneIn.value : 0) || 0), 2);
         cashIn.value = Math.max(roundTo(totalF - others, 2), 0);
         update();
       });
@@ -741,6 +942,7 @@ function openPaymentModal(t) {
         if (method === 'mixed') {
           split = [
             { method: 'cash', amount: roundTo(Number(cashIn.value) || 0, 2) },
+            { method: 'vodafone_cash', amount: roundTo(Number(vodafoneIn ? vodafoneIn.value : 0) || 0, 2) },
             { method: 'card', amount: roundTo(Number(cardIn.value) || 0, 2) },
             { method: 'wallet', amount: roundTo(Number(walletIn.value) || 0, 2) },
           ].filter((p) => p.amount > 0);
@@ -783,8 +985,16 @@ function openPaymentModal(t) {
 }
 
 function submitSale(method, paid, force, currencyCode, paidOriginal, itemsOverride, payments) {
+  const branch = localStorage.getItem('zain_active_branch') || (state.user && state.user.branch) || 'فرع سموحة';
   return api('POST', '/api/sales', {
-    items: itemsOverride || state.cart.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_price: i.unit_price, discount: i.discount })),
+    items: itemsOverride || state.cart.map((i) => ({
+      product_id: i.product_id,
+      qty: i.qty,
+      unit_price: i.unit_price,
+      discount: i.discount,
+      dimensions: i.dimensions || null,
+      unit: i.unit || null,
+    })),
     customer_id: state.cartMeta.customer_id || null,
     pos_mode: state.cartMeta.pos_mode,
     payment_method: method,
@@ -794,6 +1004,10 @@ function submitSale(method, paid, force, currencyCode, paidOriginal, itemsOverri
     discount: Number(state.cartMeta.discount) || 0,
     tax: taxMode() === 'manual' ? Number(state.cartMeta.tax) || 0 : null,
     shift_id: state.shift ? state.shift.id : null,
+    branch,
+    order_type: state.cartMeta.pos_mode === 'delivery' ? 'external_delivery' : (state.cartMeta.order_type || 'direct'),
+    delivery_status: state.cartMeta.pos_mode === 'delivery' ? 'preparing' : 'completed',
+    delivery_notes: state.cartMeta.delivery_notes || null,
     ...(payments ? { payments } : {}),
     ...(force ? { force_credit_limit: true } : {}),
   });
@@ -822,6 +1036,8 @@ function creditLimitWarning(details, onConfirm) {
 
 async function afterSale(res) {
   state.cart = [];
+  try { localStorage.removeItem('zain_auto_suspended_cart'); } catch {}
+  openCashDrawer();
   const invId = res.invoice.id;
   await Promise.all([
     refreshProducts(),

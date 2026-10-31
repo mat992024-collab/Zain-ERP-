@@ -47,6 +47,10 @@ function migrate() {
   ensure('invoices', 'tax_inclusive', 'tax_inclusive INTEGER NOT NULL DEFAULT 0');
   ensure('settings', 'category', "category TEXT NOT NULL DEFAULT 'general'");
   ensure('products', 'units', "units TEXT NOT NULL DEFAULT '[]'");
+  ensure('products', 'package_size', 'package_size TEXT');
+  ensure('products', 'profit_margin_pct', 'profit_margin_pct REAL NOT NULL DEFAULT 0');
+  ensure('products', 'wholesale_min_qty', 'wholesale_min_qty REAL NOT NULL DEFAULT 1');
+  ensure('products', 'shelf_location', 'shelf_location TEXT');
   ensure('users', 'permissions', "permissions TEXT NOT NULL DEFAULT '[]'");
   ensure('invoices', 'currency', 'currency TEXT');
   ensure('invoices', 'exchange_rate', 'exchange_rate REAL NOT NULL DEFAULT 1');
@@ -60,6 +64,32 @@ function migrate() {
   ensure('vouchers', 'amount_original', 'amount_original REAL');
   ensure('invoices', 'payments', 'payments TEXT');
   ensure('shifts', 'total_wallet', 'total_wallet REAL NOT NULL DEFAULT 0');
+  ensure('shifts', 'total_vodafone_cash', 'total_vodafone_cash REAL NOT NULL DEFAULT 0');
+  ensure('users', 'branch', "branch TEXT DEFAULT 'الفرع الرئيسي'");
+  ensure('invoices', 'branch', "branch TEXT DEFAULT 'الفرع الرئيسي'");
+  ensure('invoices', 'order_type', "order_type TEXT DEFAULT 'direct'");
+  ensure('invoices', 'delivery_status', "delivery_status TEXT DEFAULT 'completed'");
+  ensure('invoices', 'delivery_notes', 'delivery_notes TEXT');
+  ensure('invoice_items', 'dimensions', 'dimensions TEXT');
+  ensure('products', 'is_meter_unit', 'is_meter_unit INTEGER NOT NULL DEFAULT 0');
+  ensure('products', 'meter_length', 'meter_length REAL DEFAULT 0');
+  ensure('products', 'meter_width', 'meter_width REAL DEFAULT 0');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sync_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity TEXT NOT NULL,
+      entity_id INTEGER,
+      action TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      branch TEXT NOT NULL DEFAULT 'الفرع الرئيسي',
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      synced_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sync_queue_status ON sync_queue(status);
+  `);
 }
 
 function bootstrap() {

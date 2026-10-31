@@ -13,7 +13,7 @@ const CHROME = [
 ].find((p) => fs.existsSync(p));
 const PORT = 4197;
 const DEBUG = 9300 + Math.floor(Math.random() * 400);
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = `http://127.0.41.80:${PORT}`;
 const DB = path.join(ROOT, 'data', 'test', 'ui-test.db');
 const udd = path.join(os.tmpdir(), 'zain-cdp-' + Date.now());
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

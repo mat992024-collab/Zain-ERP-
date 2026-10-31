@@ -9,7 +9,7 @@ Node.js built-in http + `node:sqlite`، صفر اعتماديات وقت الت�
 npm install            # مرة واحدة (devDependencies فقط: tailwindcss)
 npm run build:css      # إلزامي بعد أي تعديل على src/web/styles.css
 npm start              # تشغيل + فتح Edge/Chrome في وضع --app
-npm run serve          # الخادم فقط (المنفذ 4180 أو ZAIN_PORT)
+npm run serve          # الخادم فقط (المنفذ 48180 أو ZAIN_PORT)
 npm test               # 3 مجموعات: API + رسم شاشات + متصفح حقيقي
 npm run test:api       # tests/e2e.js            (352 فحصاً)
 npm run test:render    # tests/render.test.mjs   (14 فحصاً)

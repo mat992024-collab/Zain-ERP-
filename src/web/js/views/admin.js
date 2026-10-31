@@ -36,10 +36,11 @@ export async function renderAdmin(c) {
         ${canManage ? '<button id="uAdd" class="btn btn-primary"><i class="bi bi-person-plus"></i> مستخدم جديد</button>' : ''}
       </div>
       <div class="overflow-auto max-h-[70vh]"><table class="w-full">
-        <thead><tr><th class="th">المستخدم</th><th class="th">الاسم الكامل</th><th class="th">الدور</th><th class="th">الصلاحيات</th><th class="th">الهاتف</th><th class="th">الحالة</th><th class="th"></th></tr></thead>
+        <thead><tr><th class="th">المستخدم</th><th class="th">الاسم الكامل</th><th class="th">الفرع</th><th class="th">الدور</th><th class="th">الصلاحيات</th><th class="th">الهاتف</th><th class="th">الحالة</th><th class="th"></th></tr></thead>
         <tbody>${data.rows.map((u) => `<tr class="tr">
           <td class="td font-mono text-xs font-bold">${esc(u.username)}</td>
           <td class="td font-bold">${esc(u.full_name)}</td>
+          <td class="td text-xs font-bold text-slate-600">${esc(u.branch || 'الرئيسي')}</td>
           <td class="td"><span class="badge ${u.role === 'admin' ? 'badge-info' : 'badge-mute'}">${esc(ROLE_LABELS[u.role] || u.role)}</span></td>
           <td class="td text-xs text-slate-500">${u.role === 'admin' ? 'كل الصلاحيات' : esc((u.permissions || []).join('، ') || 'لا شيء')}</td>
           <td class="td text-xs">${esc(u.phone || '—')}</td>
@@ -56,7 +57,8 @@ export async function renderAdmin(c) {
       <div class="font-black mb-2"><i class="bi bi-info-circle text-zain-600"></i> ملاحظة</div>
       <p class="text-sm text-slate-500">دور "مدير النظام" يمتلك جميع الصلاحيات تلقائياً. للأدوار الأخرى حدّد الصلاحيات المطلوبة من نموذج التعديل.</p>
     </div>
-    ${canBackup ? backupCard(backup) : ''}`;
+    ${canBackup ? backupCard(backup) : ''}
+    ${canManage ? dangerCard() : ''}`;
 
   const curAdd = c.querySelector('#curAdd');
   if (curAdd) curAdd.addEventListener('click', () => currencyForm(null, currencyData));
@@ -159,6 +161,54 @@ export async function renderAdmin(c) {
     uploadInput.value = '';
   });
 
+  const expJson = c.querySelector('#bkExportJson');
+  if (expJson) expJson.addEventListener('click', async () => {
+    try {
+      await downloadFile('/api/export-json', `zain-backup-${Date.now()}.json`);
+      toast('تم تصدير ملف JSON بنجاح', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  const impJson = c.querySelector('#bkImportJson');
+  if (impJson) impJson.addEventListener('change', async () => {
+    const file = impJson.files && impJson.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const res = await api('POST', '/api/import-json', payload);
+      toast(`تم استيراد ${res.imported} سجل بنجاح`, 'success');
+      setTimeout(() => location.reload(), 800);
+    } catch (e) { toast(e.message, 'error'); }
+    impJson.value = '';
+  });
+
+  const btnReset = c.querySelector('#btnFactoryReset');
+  if (btnReset) btnReset.addEventListener('click', () => {
+    modal({
+      title: 'تأكيد إعادة ضبط المصنع',
+      size: 'max-w-md',
+      body: `
+        <div class="text-rose-600 font-bold mb-3"><i class="bi bi-exclamation-triangle"></i> تنبيه فائق الأهمية!</div>
+        <p class="text-xs text-slate-600 leading-relaxed mb-4">سيتم مسح جميع الفواتير والمبيعات والمشتريات وحركات المخزون والقيود المحاسبية بالكامل وتصفير الأرصدة. لا يمكن التراجع عن هذه العملية بعد تنفيذها.</p>
+        ${field('كلمة مرور المدير للتأكيد *', '<input id="resetAdminPass" type="password" class="field" placeholder="أدخل كلمة مرور الحساب الحالي" required />')}`,
+      footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="confirmResetBtn" class="btn btn-danger"><i class="bi bi-trash"></i> تأكيد التصفير النهائي</button>`,
+      onMount(mWrap, mClose) {
+        mWrap.querySelector('[data-cancel]').addEventListener('click', mClose);
+        mWrap.querySelector('#confirmResetBtn').addEventListener('click', async () => {
+          const pass = (mWrap.querySelector('#resetAdminPass').value || '').trim();
+          if (!pass) { toast('أدخل كلمة المرور', 'error'); return; }
+          try {
+            await api('POST', '/api/settings/factory-reset', { password: pass });
+            toast('تمت إعادة ضبط المصنع بنجاح', 'success');
+            mClose();
+            setTimeout(() => location.reload(), 1000);
+          } catch (err) { toast(err.message, 'error'); }
+        });
+      },
+    });
+  });
+
   function currencyCard(data) {
     const rows = data.rows || [];
     const base = data.base || rows.find((r) => r.is_base) || null;
@@ -235,6 +285,8 @@ export async function renderAdmin(c) {
         <div class="p-4 flex justify-between items-center border-b border-slate-100">
           <div class="font-black flex items-center gap-2"><i class="bi bi-database-check text-zain-600"></i> النسخ الاحتياطي والاستعادة</div>
           <div class="flex gap-2">
+            <button id="bkExportJson" class="btn btn-ghost"><i class="bi bi-filetype-json"></i> تصدير JSON</button>
+            <label class="btn btn-ghost cursor-pointer"><i class="bi bi-file-earmark-arrow-up"></i> استيراد JSON<input type="file" id="bkImportJson" accept=".json,application/json" class="hidden" /></label>
             <label class="btn btn-ghost cursor-pointer"><i class="bi bi-upload"></i> استعادة من ملف<input type="file" id="bkUpload" accept=".db,.zip,application/octet-stream,application/zip" class="hidden" /></label>
             <button id="bkCreate" class="btn btn-primary"><i class="bi bi-download"></i> نسخة احتياطية الآن</button>
           </div>
@@ -281,6 +333,19 @@ export async function renderAdmin(c) {
       </div>`;
   }
 
+  function dangerCard() {
+    return `
+      <div class="card mt-4 border border-rose-200 bg-rose-50/30" id="dangerCard">
+        <div class="p-4 flex flex-wrap justify-between items-center gap-3">
+          <div>
+            <div class="font-black text-rose-700 flex items-center gap-2"><i class="bi bi-exclamation-triangle-fill"></i> منطقة الخطر: إعادة ضبط المصنع</div>
+            <div class="text-xs text-rose-600 mt-1">مسح الفواتير وحركات المخزون والقيود وتصفير النظام إلى الحالة الأصلية. يتطلب كلمة مرور المدير.</div>
+          </div>
+          <button id="btnFactoryReset" class="btn btn-danger"><i class="bi bi-radioactive"></i> إعادة ضبط المصنع</button>
+        </div>
+      </div>`;
+  }
+
   async function userForm(u) {
     const role = u ? u.role : 'cashier';
     const perms = u ? (u.permissions || []) : [];
@@ -290,6 +355,11 @@ export async function renderAdmin(c) {
       body: `
         ${field('اسم الدخول', `<input id="uName" class="field" value="${esc(u ? u.username : '')}" ${u ? 'readonly' : ''} />`)}
         ${field('الاسم الكامل', `<input id="uFull" class="field" value="${esc(u ? u.full_name : '')}" />`)}
+        ${field('فرع العمل', `<select id="uBranch" class="field">
+          <option value="فرع سموحة" ${(u ? u.branch : '') === 'فرع سموحة' ? 'selected' : ''}>فرع سموحة</option>
+          <option value="فرع ميت غمر" ${(u ? u.branch : '') === 'فرع ميت غمر' ? 'selected' : ''}>فرع ميت غمر</option>
+          <option value="الفرع الرئيسي" ${(u ? u.branch : '') === 'الفرع الرئيسي' ? 'selected' : ''}>الفرع الرئيسي</option>
+        </select>`)}
         ${field('الهاتف', `<input id="uPhone" class="field" value="${esc(u ? u.phone || '' : '')}" />`)}
         ${field('الصفة', `<select id="uRole" class="field">
           <option value="admin" ${role === 'admin' ? 'selected' : ''}>مدير النظام</option>
@@ -310,6 +380,7 @@ export async function renderAdmin(c) {
           const payload = {
             username: wrap.querySelector('#uName').value,
             full_name: wrap.querySelector('#uFull').value,
+            branch: wrap.querySelector('#uBranch').value,
             phone: wrap.querySelector('#uPhone').value,
             role: wrap.querySelector('#uRole').value,
             permissions,
@@ -411,18 +482,48 @@ export async function openSettings() {
         <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_shift_required" class="accent-zain-600" ${s.shift_required === '1' ? 'checked' : ''} /> إلزام فتح وردية للبيع</label>
         <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_ai_enabled" class="accent-zain-600" ${s.ai_enabled === '1' ? 'checked' : ''} /> تشغيل محرك الذكاء الاصطناعي</label>
         <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_low_stock_alert" class="accent-zain-600" ${s.low_stock_alert === '1' ? 'checked' : ''} /> تنبيهات المخزون المنخفض</label>
+        ${field('سياسة المرتجع (أقصى مدة بالأيام)', `<input id="set_return_policy_max_days" type="number" class="field" value="${esc(s.return_policy_max_days || '14')}" />`)}
 
-        <div class="col-span-2 font-black text-zain-700 border-b border-slate-100 pb-2 mt-2">باركود الميزان</div>
-        <label class="flex items-center gap-2 text-sm col-span-2"><input type="checkbox" id="set_scale_enabled" class="accent-zain-600" ${s.scale_enabled === '1' ? 'checked' : ''} /> تفعيل قراءة باركود الميزان في نقاط البيع</label>
-        ${field('وضع الميزان', `<select id="set_scale_mode" class="field">
-          <option value="weight" ${s.scale_mode === 'weight' ? 'selected' : ''}>وزن (الكمية = القيمة)</option>
-          <option value="price" ${s.scale_mode === 'price' ? 'selected' : ''}>سعر (الإجمالي = القيمة)</option>
+        <div class="col-span-2 font-black text-zain-700 border-b border-slate-100 pb-2 mt-2">إعدادات الميزان الإلكتروني</div>
+        <div class="col-span-2">
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_scale_enabled" class="accent-zain-600" ${s.scale_enabled === '1' ? 'checked' : ''} /> تفعيل ميزان الباركود</label>
+        </div>
+        ${field('نمط الميزان', `<select id="set_scale_mode" class="field">
+          <option value="weight" ${s.scale_mode === 'weight' ? 'selected' : ''}>وزن</option>
+          <option value="price" ${s.scale_mode === 'price' ? 'selected' : ''}>سعر</option>
         </select>`)}
-        ${field('بادئة الباركود', `<input id="set_scale_prefix" class="field" value="${esc(s.scale_prefix || '2')}" />`)}
-        ${field('طول رمز الصنف (PLU)', `<input id="set_scale_plu_len" type="number" min="1" max="10" class="field" value="${esc(s.scale_plu_len || '5')}" />`)}
-        ${field('طول قيمة الوزن/السعر', `<input id="set_scale_value_len" type="number" min="1" max="10" class="field" value="${esc(s.scale_value_len || '5')}" />`)}
-        ${field('الخانات العشرية للقيمة', `<input id="set_scale_value_decimals" type="number" min="0" max="4" class="field" value="${esc(s.scale_value_decimals || '3')}" />`)}
-        <div class="col-span-2 text-[11px] text-slate-500">مثال: البادئة 2 + 5 أرقام للرمز + 5 أرقام للوزن/السعر + رقم تحقق يُهمل. يُطابق الرمز مع باركود الصنف أو رقم القطعة أو معرّف الصنف.</div>
+        ${field('بادئة الميزان', `<input id="set_scale_prefix" class="field" value="${esc(s.scale_prefix || '2')}" />`)}
+        ${field('طول كود الصنف (PLU)', `<input id="set_scale_plu_len" type="number" class="field" value="${esc(s.scale_plu_len || '5')}" />`)}
+        ${field('طول القيمة', `<input id="set_scale_value_len" type="number" class="field" value="${esc(s.scale_value_len || '5')}" />`)}
+        ${field('الخانات العشرية', `<input id="set_scale_value_decimals" type="number" class="field" value="${esc(s.scale_value_decimals || '3')}" />`)}
+
+        <div class="col-span-2 font-black text-zain-700 border-b border-slate-100 pb-2 mt-2">الربط الخارجي والفاتورة الإلكترونية (ETA / WhatsApp)</div>
+        <div class="col-span-2 flex items-center gap-4">
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_eta_enabled" class="accent-zain-600" ${s.eta_enabled === '1' ? 'checked' : ''} /> تفعيل منظومة الفاتورة الإلكترونية (ETA)</label>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_whatsapp_enabled" class="accent-zain-600" ${s.whatsapp_enabled === '1' ? 'checked' : ''} /> تفعيل واتساب بزنس API</label>
+        </div>
+        ${field('ETA Client ID', `<input id="set_eta_client_id" class="field font-mono" value="${esc(s.eta_client_id || '')}" />`)}
+        ${field('ETA Client Secret', `<input id="set_eta_client_secret" type="password" class="field font-mono" value="${esc(s.eta_client_secret || '')}" />`)}
+        ${field('بيئة ETA', `<select id="set_eta_environment" class="field">
+          <option value="preproduction" ${s.eta_environment === 'preproduction' ? 'selected' : ''}>تجريبية (Pre-production)</option>
+          <option value="production" ${s.eta_environment === 'production' ? 'selected' : ''}>فعلية (Production)</option>
+        </select>`)}
+        ${field('معرف رقم واتساب (Phone Number ID)', `<input id="set_whatsapp_phone_number_id" class="field font-mono" value="${esc(s.whatsapp_phone_number_id || '')}" />`)}
+        <div class="col-span-2">${field('رمز الوصول لواتساب (Access Token)', `<input id="set_whatsapp_token" type="password" class="field font-mono" value="${esc(s.whatsapp_token || '')}" />`)}</div>
+
+        <div class="col-span-2 font-black text-zain-700 border-b border-slate-100 pb-2 mt-2">النسخ الاحتياطي السحابي (Webhook / Zapier / Make)</div>
+        <div class="col-span-2">
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_cloud_backup_enabled" class="accent-zain-600" ${s.cloud_backup_enabled === '1' ? 'checked' : ''} /> تفعيل النسخ الاحتياطي السحابي التلقائي</label>
+        </div>
+        <div class="col-span-2">${field('Webhook URL', `<input id="set_cloud_backup_webhook_url" class="field font-mono" placeholder="https://hooks.zapier.com/... أو Make Webhook" value="${esc(s.cloud_backup_webhook_url || '')}" />`)}</div>
+
+        <div class="col-span-2 font-black text-zain-700 border-b border-slate-100 pb-2 mt-2">الزكاة</div>
+        ${field('نسبة الزكاة %', `<input id="set_zakat_rate" type="number" step="0.01" class="field" value="${esc(s.zakat_rate || '2.5')}" />`)}
+        ${field('نصاب الزكاة بالجرام (ذهب)', `<input id="set_zakat_nisab_grams" type="number" step="0.01" class="field" value="${esc(s.zakat_nisab_grams || '85')}" />`)}
+        ${field('سعر غرام الذهب (عمله أساسية)', `<input id="set_zakat_gold_price" type="number" step="0.01" class="field" value="${esc(s.zakat_gold_price || '0')}" />`)}
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_zakat_include_receivables" class="accent-zain-600" ${(s.zakat_include_receivables === undefined || s.zakat_include_receivables === '1') ? 'checked' : ''} /> تضمين الذمم المدينة</label>
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="set_zakat_include_liabilities" class="accent-zain-600" ${(s.zakat_include_liabilities === undefined || s.zakat_include_liabilities === '1') ? 'checked' : ''} /> خصم الذمم الدائنة</label>
+        <div class="col-span-2 text-[11px] text-slate-500">يُحسب الزكاة عادةً ٢٫٥٪ من صافي المال الزكوي عند بلوغ النصاب (٨٥ غم ذهب). أدخل سعر الغرام لحساب النصاب بالعملة.</div>
       </div>`,
     footer: canEdit ? `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="setSave" class="btn btn-primary"><i class="bi bi-check2-circle"></i> حفظ الإعدادات</button>` : `<button data-close class="btn btn-ghost">إغلاق</button>`,
     onMount(wrap, close) {
@@ -473,49 +574,65 @@ export async function openSettings() {
       const save = wrap.querySelector('#setSave');
       if (!save) return;
       save.addEventListener('click', async () => {
+        const val = (id, def = '') => { const el = wrap.querySelector('#' + id); return el ? el.value : def; };
+        const chk = (id, def = 0) => { const el = wrap.querySelector('#' + id); return el ? (el.checked ? 1 : 0) : def; };
         const payload = {
-          company_name: wrap.querySelector('#set_company_name').value,
-          company_phone: wrap.querySelector('#set_company_phone').value,
-          company_address: wrap.querySelector('#set_company_address').value,
-          company_tax_id: wrap.querySelector('#set_company_tax_id').value,
-          industry: wrap.querySelector('#set_industry').value,
-          currency_symbol: wrap.querySelector('#set_currency_symbol').value,
-          theme: wrap.querySelector('#set_theme').value,
-          printer_type: wrap.querySelector('#set_printer_type').value,
-          label_width_mm: wrap.querySelector('#set_label_width_mm').value,
-          receipt_footer: wrap.querySelector('#set_receipt_footer').value,
-          print_header_text: wrap.querySelector('#set_print_header_text').value,
-          print_header_sub: wrap.querySelector('#set_print_header_sub').value,
-          print_footer_note: wrap.querySelector('#set_print_footer_note').value,
-          print_invoice_note: wrap.querySelector('#set_print_invoice_note').value,
-          print_label_note: wrap.querySelector('#set_print_label_note').value,
-          print_font_size: wrap.querySelector('#set_print_font_size').value,
-          print_density: wrap.querySelector('#set_print_density').value,
-          print_show_logo: wrap.querySelector('#set_print_show_logo').checked ? 1 : 0,
+          company_name: val('set_company_name'),
+          company_phone: val('set_company_phone'),
+          company_address: val('set_company_address'),
+          company_tax_id: val('set_company_tax_id'),
+          industry: val('set_industry'),
+          currency_symbol: val('set_currency_symbol'),
+          theme: val('set_theme'),
+          printer_type: val('set_printer_type'),
+          label_width_mm: val('set_label_width_mm'),
+          receipt_footer: val('set_receipt_footer'),
+          print_header_text: val('set_print_header_text'),
+          print_header_sub: val('set_print_header_sub'),
+          print_footer_note: val('set_print_footer_note'),
+          print_invoice_note: val('set_print_invoice_note'),
+          print_label_note: val('set_print_label_note'),
+          print_font_size: val('set_print_font_size'),
+          print_density: val('set_print_density'),
+          print_show_logo: chk('set_print_show_logo'),
           print_logo_data: logoData,
-          print_show_tax_id: wrap.querySelector('#set_print_show_tax_id').checked ? 1 : 0,
-          print_show_cashier: wrap.querySelector('#set_print_show_cashier').checked ? 1 : 0,
-          default_pos_mode: wrap.querySelector('#set_default_pos_mode').value,
-          credit_limit_mode: wrap.querySelector('#set_credit_limit_mode').value,
-          default_tax_rate: wrap.querySelector('#set_default_tax_rate').value,
-          tax_mode: wrap.querySelector('#set_tax_mode').value,
-          negative_stock: wrap.querySelector('#set_negative_stock').checked ? 1 : 0,
-          shift_required: wrap.querySelector('#set_shift_required').checked ? 1 : 0,
-          ai_enabled: wrap.querySelector('#set_ai_enabled').checked ? 1 : 0,
-          low_stock_alert: wrap.querySelector('#set_low_stock_alert').checked ? 1 : 0,
-          scale_enabled: wrap.querySelector('#set_scale_enabled').checked ? 1 : 0,
-          scale_mode: wrap.querySelector('#set_scale_mode').value,
-          scale_prefix: wrap.querySelector('#set_scale_prefix').value,
-          scale_plu_len: wrap.querySelector('#set_scale_plu_len').value,
-          scale_value_len: wrap.querySelector('#set_scale_value_len').value,
-          scale_value_decimals: wrap.querySelector('#set_scale_value_decimals').value,
+          print_show_tax_id: chk('set_print_show_tax_id'),
+          print_show_cashier: chk('set_print_show_cashier'),
+          default_pos_mode: val('set_default_pos_mode'),
+          credit_limit_mode: val('set_credit_limit_mode'),
+          default_tax_rate: val('set_default_tax_rate'),
+          tax_mode: val('set_tax_mode'),
+          negative_stock: chk('set_negative_stock'),
+          shift_required: chk('set_shift_required'),
+          ai_enabled: chk('set_ai_enabled'),
+          low_stock_alert: chk('set_low_stock_alert'),
+          return_policy_max_days: val('set_return_policy_max_days', '14'),
+          eta_enabled: chk('set_eta_enabled'),
+          eta_client_id: val('set_eta_client_id'),
+          eta_client_secret: val('set_eta_client_secret'),
+          eta_environment: val('set_eta_environment', 'preproduction'),
+          whatsapp_enabled: chk('set_whatsapp_enabled'),
+          whatsapp_phone_number_id: val('set_whatsapp_phone_number_id'),
+          whatsapp_token: val('set_whatsapp_token'),
+          cloud_backup_enabled: chk('set_cloud_backup_enabled'),
+          cloud_backup_webhook_url: val('set_cloud_backup_webhook_url'),
+          scale_enabled: chk('set_scale_enabled'),
+          scale_mode: val('set_scale_mode', 'weight'),
+          scale_prefix: val('set_scale_prefix', '2'),
+          scale_plu_len: val('set_scale_plu_len', '5'),
+          scale_value_len: val('set_scale_value_len', '5'),
+          scale_value_decimals: val('set_scale_value_decimals', '3'),
+          zakat_rate: val('set_zakat_rate', '2.5'),
+          zakat_nisab_grams: val('set_zakat_nisab_grams', '85'),
+          zakat_gold_price: val('set_zakat_gold_price', '0'),
+          zakat_include_receivables: chk('set_zakat_include_receivables', 1),
+          zakat_include_liabilities: chk('set_zakat_include_liabilities', 1),
         };
         try {
           const res = await api('PUT', '/api/settings', payload);
           state.settings = res.settings;
           toast('تم حفظ الإعدادات', 'success');
           close();
-          location.reload();
         } catch (e) { toast(e.message, 'error'); }
       });
     },

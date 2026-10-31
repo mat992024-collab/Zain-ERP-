@@ -1,6 +1,7 @@
 const backup = require('../modules/backup.routes');
 const reminders = require('../modules/reminders.routes');
 const scheduled = require('../modules/scheduled.routes');
+const cloudSync = require('./cloud-sync');
 const db = require('../db');
 
 function autoBackupDue(state, now = new Date()) {
@@ -91,6 +92,7 @@ function tick() {
   runDailyDigest();
   runScheduledInvoices();
   markOverdueInstallments();
+  cloudSync.syncNow().catch(() => {});
 }
 
 function start() {

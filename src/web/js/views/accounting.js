@@ -1,8 +1,8 @@
 import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, formToObject, debounce, downloadFile } from '../core.js';
 
 const SOURCE_LABELS = {
-  sale: 'مبيعات', sale_cash: 'مبيعات نقدية', sale_card: 'مبيعات بطاقة', sale_wallet: 'مبيعات محفظة',
-  purchase: 'مشتريات', return_sale: 'مرتجع مبيعات', return_sale_cash: 'مرتجع نقدي', return_sale_card: 'مرتجع بطاقة', return_sale_wallet: 'مرتجع محفظة',
+  sale: 'مبيعات', sale_cash: 'مبيعات نقدية', sale_card: 'مبيعات بطاقة', sale_wallet: 'مبيعات محفظة', sale_vodafone: 'فودافون كاش',
+  purchase: 'مشتريات', return_sale: 'مرتجع مبيعات', return_sale_cash: 'مرتجع نقدي', return_sale_card: 'مرتجع بطاقة', return_sale_wallet: 'مرتجع محفظة', return_vodafone: 'مرتجع فودافون كاش',
   return_purchase: 'مرتجع مشتريات', expense: 'مصروف', receipt: 'سند قبض', payout: 'سند صرف',
   manual: 'حركة يدوية', deposit: 'إيداع', withdraw: 'سحب',
 };
@@ -19,6 +19,7 @@ export async function renderAccounting(c) {
     { key: 'partners', label: 'الشركاء', icon: 'bi-person-badge' },
     { key: 'income', label: 'قائمة الدخل', icon: 'bi-graph-up-arrow' },
     { key: 'zreport', label: 'تقرير Z', icon: 'bi-clipboard2-check' },
+    { key: 'zakat', label: 'الزكاة', icon: 'bi-moon-stars' },
     { key: 'trial', label: 'ميزان المراجعة', icon: 'bi-clipboard-data' },
   ];
   const exportMap = { treasury: 'treasury', expenses: 'expenses', accounts: 'accounts' };
@@ -45,7 +46,7 @@ export async function renderAccounting(c) {
   });
 
   const pane = () => c.querySelector('#accPane');
-  const open = (key) => ({ treasury: treasury, vouchers: vouchers, expenses: expenses, accounts: accounts, installments: installments, scheduled: scheduled, partners: partners, income: income, zreport: zreport, trial: trial }[key](pane()));
+  const open = (key) => ({ treasury: treasury, vouchers: vouchers, expenses: expenses, accounts: accounts, installments: installments, scheduled: scheduled, partners: partners, income: income, zreport: zreport, zakat: zakat, trial: trial }[key](pane()));
   treasury(pane());
 
   async function treasury(p) {
@@ -272,6 +273,73 @@ export async function renderAccounting(c) {
       </div>`;
     p.querySelector('#zrApply').addEventListener('click', () => zreport(p));
     p.querySelector('#zrPrint').addEventListener('click', () => openPrint(`/api/print/z-report?date=${encodeURIComponent(date)}`));
+  }
+
+  async function zakat(p) {
+    await renderZakat(p);
+  }
+
+  async function renderZakat(p, data) {
+    const d = data || await api('GET', '/api/reports/zakat');
+    p.innerHTML = `
+      <div class="card p-4 mb-4 flex flex-wrap items-end gap-3">
+        <div><label class="label">نسبة الزكاة %</label><input id="zkRate" type="number" step="0.01" class="field !w-28" value="${esc(String(d.settings.rate))}" /></div>
+        <div><label class="label">النصاب (غرام ذهب)</label><input id="zkGrams" type="number" step="0.01" class="field !w-28" value="${esc(String(d.settings.nisab_grams))}" /></div>
+        <div><label class="label">سعر الغرام</label><input id="zkGold" type="number" step="0.01" class="field !w-32" value="${esc(String(d.settings.gold_price))}" /></div>
+        <label class="flex items-center gap-2 text-sm h-10"><input id="zkRecv" type="checkbox" class="accent-zain-600" ${d.settings.include_receivables ? 'checked' : ''} /> القمم المدينة</label>
+        <label class="flex items-center gap-2 text-sm h-10"><input id="zkLiab" type="checkbox" class="accent-zain-600" ${d.settings.include_liabilities ? 'checked' : ''} /> القمم الدائنة</label>
+        <button id="zkApply" class="btn btn-primary"><i class="bi bi-arrow-repeat"></i> احتساب</button>
+        <button id="zkPrint" class="btn btn-ghost"><i class="bi bi-printer"></i> طباعة</button>
+      </div>
+      <div class="grid grid-cols-4 gap-4 mb-4">
+        <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-wallet2"></i></div><div><div class="kpi-value">${money(d.assets.cash)}</div><div class="kpi-label">النقد بالخزنة</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-box-seam"></i></div><div><div class="kpi-value">${money(d.assets.inventory_cost)}</div><div class="kpi-label">قيمة المخزون (تكلفة)</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-amber-100 text-amber-700"><i class="bi bi-people"></i></div><div><div class="kpi-value">${money(d.assets.receivables)}</div><div class="kpi-label">القمم المدينة</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-rose-100 text-rose-700"><i class="bi bi-cash-coin"></i></div><div><div class="kpi-value">${money(d.zakat_due)}</div><div class="kpi-label">الزكاة المستحقة</div></div></div>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div class="card">
+          <div class="p-4 border-b border-slate-100 font-black">حساب الوعاء الزكوي</div>
+          <div class="p-4 space-y-2 text-sm">
+            <div class="flex justify-between"><span>النقد بالخزنة</span><b>${money(d.assets.cash)}</b></div>
+            <div class="flex justify-between"><span>قيمة المخزون (تكلفة)</span><b>${money(d.assets.inventory_cost)}</b></div>
+            <div class="flex justify-between"><span>القمم المدينة</span><b>${money(d.assets.receivables)}</b></div>
+            <div class="flex justify-between text-rose-600"><span>القمم الدائنة (تُخصم)</span><b>-${money(d.liabilities)}</b></div>
+            <div class="flex justify-between border-b border-dashed pb-2"><span class="font-bold">إجمالي الأصول الزكوية</span><b>${money(d.assets.gross)}</b></div>
+            <div class="flex justify-between"><span class="font-bold">صافي المال الزكوي</span><b class="text-zain-700">${money(d.net_assets)}</b></div>
+            <div class="flex justify-between"><span>قيمة النصاب (${d.nisab.grams} غم)</span><b>${money(d.nisab.value)}</b></div>
+            <div class="flex justify-between"><span>بلوغ النصاب</span><span class="badge ${d.nisab.reached ? 'badge-ok' : 'badge-warn'}">${d.nisab.reached ? 'بلغ النصاب' : 'دون النصاب'}</span></div>
+            <div class="flex justify-between border-t border-dashed pt-2"><span class="font-bold">الزكاة المستحقة (${d.rate}%)</span><b class="text-emerald-600">${money(d.zakat_due)}</b></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="p-4 border-b border-slate-100 font-black">تفاصيل المخزون</div>
+          <div class="p-4 space-y-2 text-sm">
+            <div class="flex justify-between"><span>قيمة المخزون بالتكلفة</span><b>${money(d.assets.inventory_cost)}</b></div>
+            <div class="flex justify-between"><span>قيمة المخزون بسعر البيع</span><b>${money(d.assets.inventory_sale)}</b></div>
+            <div class="flex justify-between"><span>ربح المخزون المتوقع</span><b class="text-emerald-600">${money(d.assets.inventory_sale - d.assets.inventory_cost)}</b></div>
+            <div class="flex justify-between border-t border-dashed pt-2"><span>رصيد الخزنة الحالي</span><b>${money(d.treasury_balance)}</b></div>
+            <p class="text-[11px] text-slate-400 pt-2 leading-5">يُحتسب الوعاء الزكوي وفق القيمة الدفترية للمخزون والنقد والذمم، مع خصم الالتزامات عند تفعيل الخيار. النصاب = عدد جرامات الذهب × سعر الغرام. النتيجة استرشادية وتخضع لتقدير المحاسب الشرعي.</p>
+          </div>
+        </div>
+      </div>`;
+    const gather = () => ({
+      rate: p.querySelector('#zkRate').value,
+      nisab_grams: p.querySelector('#zkGrams').value,
+      gold_price: p.querySelector('#zkGold').value,
+      include_receivables: p.querySelector('#zkRecv').checked ? 1 : 0,
+      include_liabilities: p.querySelector('#zkLiab').checked ? 1 : 0,
+    });
+    p.querySelector('#zkApply').addEventListener('click', async () => {
+      const q = gather();
+      const qs = new URLSearchParams(q).toString();
+      const fresh = await api('GET', `/api/reports/zakat?${qs}`);
+      renderZakat(p, fresh);
+    });
+    p.querySelector('#zkPrint').addEventListener('click', () => {
+      const q = gather();
+      openPrint(`/api/print/zakat?${new URLSearchParams(q).toString()}`);
+    });
   }
 
   async function expenses(p) {
@@ -716,9 +784,10 @@ export async function renderShifts(c) {
         </div>
       </div>
       <div class="overflow-auto max-h-[70vh]"><table class="w-full">
-        <thead><tr><th class="th">#</th><th class="th">الموظف</th><th class="th">الفتح</th><th class="th">الإغلاق</th><th class="th">رصيد الفتح</th><th class="th">المبيعات</th><th class="th">النقدي</th><th class="th">الآجل</th><th class="th">المتوقع</th><th class="th">الإقفال</th><th class="th">الحالة</th></tr></thead>
+        <thead><tr><th class="th">#</th><th class="th">الموظف</th><th class="th">الفرع</th><th class="th">الفتح</th><th class="th">الإغلاق</th><th class="th">رصيد الفتح</th><th class="th">المبيعات</th><th class="th">النقدي</th><th class="th">الآجل</th><th class="th">المتوقع</th><th class="th">الإقفال</th><th class="th">الحالة</th></tr></thead>
         <tbody>${data.rows.map((r) => `<tr class="tr">
           <td class="td">${r.id}</td><td class="td font-bold">${esc(r.user_name || '-')}</td>
+          <td class="td text-xs font-bold text-slate-600">${esc(r.branch || 'الرئيسي')}</td>
           <td class="td text-xs">${esc(r.opened_at)}</td><td class="td text-xs">${esc(r.closed_at || '-')}</td>
           <td class="td">${money(r.opening_balance, '')}</td>
           <td class="td font-bold">${money(r.total_sales, '')}</td>

@@ -9,7 +9,11 @@ function shiftSummary(shift) {
   );
   const cash = db.get(
     `SELECT COALESCE(SUM(amount),0) AS total FROM treasury
-     WHERE shift_id = ? AND direction='in' AND source NOT IN ('sale_card','sale_wallet')`, [shift.id]
+     WHERE shift_id = ? AND direction='in' AND source NOT IN ('sale_card','sale_wallet','sale_vodafone')`, [shift.id]
+  );
+  const vodafone = db.get(
+    `SELECT COALESCE(SUM(amount),0) AS total FROM treasury
+     WHERE shift_id = ? AND direction='in' AND source = 'sale_vodafone'`, [shift.id]
   );
   const refunds = db.get(
     `SELECT COALESCE(SUM(amount),0) AS total FROM treasury
@@ -24,6 +28,7 @@ function shiftSummary(shift) {
     live_sales_total: sales.total,
     live_sales_count: sales.count,
     live_cash_in: cash.total,
+    live_vodafone_in: vodafone.total,
     live_refunds: refunds.total,
     live_expenses: expenses.total,
     expected_cash: expected,

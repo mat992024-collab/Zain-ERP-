@@ -1,6 +1,7 @@
 const db = require('../db');
 const { sendJson, HttpError } = require('../core/http');
 const ledger = require('../core/ledger');
+const cloudSync = require('../core/cloud-sync');
 const { recordMovement } = require('./products.routes');
 const currency = require('./currency.routes');
 
@@ -84,7 +85,16 @@ function normalizeItems(rawItems) {
   return rawItems.map((item) => {
     const productId = item.product_id || item.productId || null;
     const product = productId ? db.get('SELECT * FROM products WHERE id = ?', [productId]) : null;
-    const qty = Number(item.qty ?? item.quantity ?? 1) || 1;
+    let qty = Number(item.qty ?? item.quantity ?? 1) || 1;
+    let dimensions = item.dimensions || null;
+    if (item.meter_length && item.meter_width) {
+      const l = Number(item.meter_length) || 0;
+      const w = Number(item.meter_width) || 0;
+      if (l > 0 && w > 0) {
+        qty = round2(l * w * (Number(item.count || item.pieces || 1) || 1));
+        dimensions = `${l}م × ${w}م (${item.count || 1} ق)`;
+      }
+    }
     const unitPrice = Number(item.unit_price ?? item.price ?? (product ? product.sale_price : 0)) || 0;
     const discount = Number(item.discount) || 0;
     const costPrice = Number(item.cost_price ?? (product ? product.cost_price : 0)) || 0;
@@ -95,6 +105,7 @@ function normalizeItems(rawItems) {
       name: item.name || (product ? product.name : 'صنف'),
       qty,
       unit: item.unit || (product ? product.unit : 'قطعة'),
+      dimensions,
       unit_price: unitPrice,
       cost_price: costPrice,
       discount,
@@ -106,8 +117,8 @@ function normalizeItems(rawItems) {
   });
 }
 
-const PAY_METHODS = ['cash', 'card', 'wallet'];
-const PAY_LABELS = { cash: 'نقدي', card: 'بطاقة', wallet: 'محفظة', credit: 'آجل', mixed: 'مختلط' };
+const PAY_METHODS = ['cash', 'card', 'wallet', 'vodafone_cash'];
+const PAY_LABELS = { cash: 'نقدي', card: 'بطاقة', wallet: 'محفظة', vodafone_cash: 'فودافون كاش', credit: 'آجل', mixed: 'مختلط' };
 
 function normalizePayments(payments, paymentMethod, applied) {
   const list = [];
@@ -151,10 +162,11 @@ function paymentMethodOf(breakdown, applied, fallback) {
 function treasurySourceOf(method, direction) {
   if (method === 'cash') return direction === 'in' ? 'sale_cash' : 'return_sale';
   if (method === 'card') return direction === 'in' ? 'sale_card' : 'return_card';
+  if (method === 'vodafone_cash') return direction === 'in' ? 'sale_vodafone' : 'return_vodafone';
   return direction === 'in' ? 'sale_wallet' : 'return_wallet';
 }
 
-function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId, items, discount, tax, taxInclusive, paid, paymentMethod, payments, notes, installmentPlan, currencyCode, exchangeRate, totalOriginal, paidOriginal, damage }) {
+function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId, items, discount, tax, taxInclusive, paid, paymentMethod, payments, notes, installmentPlan, currencyCode, exchangeRate, totalOriginal, paidOriginal, damage, branch, orderType, deliveryStatus, deliveryNotes }) {
   const subtotal = round2(items.reduce((s, i) => s + i.qty * i.unit_price, 0));
   const itemsDiscount = round2(items.reduce((s, i) => s + i.discount, 0));
   const invoiceDiscount = round2(discount || 0);
@@ -179,13 +191,14 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
     const res = db.run(
       `INSERT INTO invoices (invoice_no, type, pos_mode, customer_id, supplier_id, user_id, shift_id,
         subtotal, discount, tax, tax_inclusive, total, paid, due, payment_method, status, notes, installment_plan,
-        currency, exchange_rate, total_original, paid_original, payments)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?)`,
+        currency, exchange_rate, total_original, paid_original, payments, branch, order_type, delivery_status, delivery_notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [invoiceNo, type, posMode, customerId || null, supplierId || null, userId || null, shiftId || null,
         subtotal, round2(itemsDiscount + invoiceDiscount), taxAmount, taxInclusive ? 1 : 0, total, applied, due,
         storedMethod, notes || null, installmentPlan ? JSON.stringify(installmentPlan) : null,
         currencyCode || null, exchangeRate || 1, totalOriginal === undefined ? null : totalOriginal,
-        paidOriginal === undefined ? null : paidOriginal, JSON.stringify(breakdown)]
+        paidOriginal === undefined ? null : paidOriginal, JSON.stringify(breakdown),
+        branch || 'الفرع الرئيسي', orderType || 'direct', deliveryStatus || (orderType === 'external_delivery' ? 'preparing' : 'completed'), deliveryNotes || null]
     );
     invoiceId = Number(res.lastInsertRowid);
 
@@ -199,9 +212,9 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
 
     for (const item of items) {
       db.run(
-        `INSERT INTO invoice_items (invoice_id, product_id, name, qty, unit, unit_price, cost_price, discount, total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [invoiceId, item.product_id, item.name, item.qty, item.unit, item.unit_price, item.cost_price, item.discount, item.total]
+        `INSERT INTO invoice_items (invoice_id, product_id, name, qty, unit, dimensions, unit_price, cost_price, discount, total)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [invoiceId, item.product_id, item.name, item.qty, item.unit, item.dimensions || null, item.unit_price, item.cost_price, item.discount, item.total]
       );
       if (item.product) {
         const restock = type !== 'return_sale' || item.restock !== false;
@@ -319,18 +332,22 @@ function persistInvoice({ type, posMode, customerId, supplierId, userId, shiftId
       const cash = round2(amountOf('cash'));
       const card = round2(amountOf('card'));
       const wallet = round2(amountOf('wallet'));
-      const rest = round2(applied - cash - card - wallet);
+      const vodafone = round2(amountOf('vodafone_cash'));
+      const rest = round2(applied - cash - card - wallet - vodafone);
       db.run(
         `UPDATE shifts SET total_sales = total_sales + ?,
           total_cash = total_cash + ?,
           total_card = total_card + ?,
           total_wallet = total_wallet + ?,
+          total_vodafone_cash = total_vodafone_cash + ?,
           total_credit = total_credit + ?
          WHERE id = ?`,
-        [sign * total, sign * cash, sign * card, sign * (wallet + Math.max(rest, 0)), sign * due, shiftId]
+        [sign * total, sign * cash, sign * card, sign * (wallet + Math.max(rest, 0)), sign * vodafone, sign * due, shiftId]
       );
     }
   });
+
+  cloudSync.enqueue('invoices', invoiceId, type === 'sale' ? 'sale' : type, { invoice_no: invoiceNo, total, branch: branch || 'الفرع الرئيسي' }, branch || 'الفرع الرئيسي');
 
   return { id: invoiceId, invoice_no: invoiceNo };
 }
@@ -363,13 +380,16 @@ module.exports = {
   normalizeItems,
   register(router) {
     router.get('/api/sales', (ctx) => {
-      const { type, pos_mode, customer_id, user_id, from, to, search, page = 1, page_size = 50 } = ctx.query;
+      const { type, pos_mode, customer_id, user_id, from, to, search, branch, order_type, delivery_status, page = 1, page_size = 50 } = ctx.query;
       const where = [];
       const params = [];
       if (type) { where.push('i.type = ?'); params.push(type); }
       if (pos_mode) { where.push('i.pos_mode = ?'); params.push(pos_mode); }
       if (customer_id) { where.push('i.customer_id = ?'); params.push(customer_id); }
       if (user_id) { where.push('i.user_id = ?'); params.push(user_id); }
+      if (branch) { where.push('i.branch = ?'); params.push(branch); }
+      if (order_type) { where.push('i.order_type = ?'); params.push(order_type); }
+      if (delivery_status) { where.push('i.delivery_status = ?'); params.push(delivery_status); }
       if (from) { where.push("date(i.created_at) >= date(?)"); params.push(from); }
       if (to) { where.push("date(i.created_at) <= date(?)"); params.push(to); }
       if (search) { where.push('(i.invoice_no LIKE ? OR c.name LIKE ?)'); params.push(`%${search}%`, `%${search}%`); }
@@ -581,13 +601,79 @@ module.exports = {
         exchangeRate: rate,
         totalOriginal,
         paidOriginal,
+        branch: body.branch || ctx.user.branch || db.getSetting('active_branch', 'الفرع الرئيسي'),
+        orderType: body.order_type || 'direct',
+        deliveryStatus: body.delivery_status || (body.order_type === 'external_delivery' ? 'preparing' : 'completed'),
+        deliveryNotes: body.delivery_notes || null,
       });
-      db.logActivity(ctx.user.id, 'sale', 'invoices', result.id, { total: body.total });
+      db.logActivity(ctx.user.id, 'sale', 'invoices', result.id, { total: body.total, branch: body.branch || ctx.user.branch });
       if (creditWarning) db.logActivity(ctx.user.id, 'credit_limit_override', 'invoices', result.id, creditWarning);
       sendJson(ctx.res, 201, {
         invoice: db.get('SELECT * FROM invoices WHERE id = ?', [result.id]),
         id: result.id,
         credit_warning: creditWarning,
+      });
+    });
+
+    router.patch('/api/sales/:id/delivery-status', (ctx) => {
+      const { status, notes } = ctx.body || {};
+      const valid = ['pending', 'preparing', 'ready', 'delivered', 'cancelled'];
+      if (!valid.includes(status)) throw new HttpError(400, 'حالة غير صالحة');
+      const inv = db.get('SELECT * FROM invoices WHERE id = ?', [ctx.params.id]);
+      if (!inv) throw new HttpError(404, 'الطلب غير موجود');
+      db.run(
+        'UPDATE invoices SET delivery_status = ?, delivery_notes = COALESCE(?, delivery_notes) WHERE id = ?',
+        [status, notes || null, inv.id]
+      );
+      db.logActivity(ctx.user.id, 'delivery_status', 'invoices', inv.id, { status });
+      sendJson(ctx.res, 200, { ok: true, id: inv.id, delivery_status: status });
+    });
+
+    router.get('/api/reports/owner-summary', (ctx) => {
+      const pin = ctx.query.pin || '';
+      const ownerPin = db.getSetting('owner_pin', '1234');
+      const isOwner = ctx.can('*') || ctx.user.role === 'admin' || (pin && pin === ownerPin);
+      if (!isOwner) throw new HttpError(403, 'غير مصرح بالاطلاع على تقارير المالك السرية');
+      const { branch, from, to } = ctx.query;
+      const where = ["i.type = 'sale'"];
+      const params = [];
+      if (branch) { where.push('i.branch = ?'); params.push(branch); }
+      if (from) { where.push('date(i.created_at) >= date(?)'); params.push(from); }
+      if (to) { where.push('date(i.created_at) <= date(?)'); params.push(to); }
+      const whereSql = `WHERE ${where.join(' AND ')}`;
+      const summary = db.get(
+        `SELECT COUNT(*) AS sales_count,
+           COALESCE(SUM(i.total), 0) AS total_revenue,
+           COALESCE(SUM(i.paid), 0) AS total_collected,
+           COALESCE(SUM(i.due), 0) AS total_receivable
+         FROM invoices i ${whereSql}`,
+        params
+      );
+      const totalRev = Number(summary.total_revenue) || 0;
+      const costRow = db.get(
+        `SELECT COALESCE(SUM(it.cost_price * it.qty), 0) AS total_cost
+         FROM invoice_items it JOIN invoices i ON i.id = it.invoice_id ${whereSql}`,
+        params
+      );
+      const totalCost = Number(costRow.total_cost) || 0;
+      const netProfit = round2(totalRev - totalCost);
+      const margin = totalRev > 0 ? round2((netProfit / totalRev) * 100) : 0;
+      const byMethod = db.all(
+        `SELECT p.method, COALESCE(SUM(p.amount), 0) AS amount
+         FROM invoice_payments p
+         JOIN invoices i ON i.id = p.invoice_id
+         ${whereSql} GROUP BY p.method`,
+        params
+      );
+      const byBranch = db.all(
+        `SELECT COALESCE(i.branch, 'الفرع الرئيسي') AS branch,
+           COUNT(*) AS count, COALESCE(SUM(i.total), 0) AS total
+         FROM invoices i WHERE i.type = 'sale' GROUP BY i.branch`
+      );
+      sendJson(ctx.res, 200, {
+        summary: { ...summary, total_cost: totalCost, net_profit: netProfit, margin_pct: margin },
+        payments: byMethod,
+        branches: byBranch,
       });
     });
 
@@ -659,6 +745,13 @@ module.exports = {
       const original = db.get('SELECT * FROM invoices WHERE id = ?', [ctx.params.id]);
       if (!original) throw new HttpError(404, 'الفاتورة غير موجودة');
       if (original.type !== 'sale') throw new HttpError(400, 'يمكن إرجاع فواتير البيع فقط');
+      const maxDays = Number(db.getSetting('return_policy_max_days', '0')) || 0;
+      if (maxDays > 0 && original.created_at) {
+        const diffDays = (Date.now() - new Date(original.created_at).getTime()) / (1000 * 60 * 60 * 24);
+        if (diffDays > maxDays) {
+          throw new HttpError(400, `تجاوزت الفاتورة الحد المسموح للإرجاع (${maxDays} يوم)`);
+        }
+      }
       const originalItems = db.all('SELECT * FROM invoice_items WHERE invoice_id = ?', [original.id]);
       const requested = Array.isArray(ctx.body.items) ? ctx.body.items : null;
       const items = normalizeItems(mapReturnItems(originalItems, requested, 'الفاتورة الأصلية'));

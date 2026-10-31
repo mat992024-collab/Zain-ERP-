@@ -390,5 +390,52 @@ module.exports = {
       fs.unlinkSync(file);
       sendJson(ctx.res, 200, { ok: true, backups: listBackups() });
     });
+
+    router.post('/api/backup/cloud/trigger', async (ctx) => {
+      requirePerm(ctx, 'backup.manage');
+      const webhookUrl = db.getSetting('cloud_backup_webhook_url', '');
+      const snap = makeZipSnapshot('zain-cloud-');
+      const payload = {
+        event: 'backup_created',
+        file: snap.name,
+        size: snap.size,
+        timestamp: new Date().toISOString(),
+      };
+      let sent = false;
+      let error = '';
+      if (webhookUrl) {
+        try {
+          const urlObj = new URL(webhookUrl);
+          const isHttps = urlObj.protocol === 'https:';
+          const lib = isHttps ? require('node:https') : require('node:http');
+          const dataStr = JSON.stringify(payload);
+          await new Promise((resolve, reject) => {
+            const req = lib.request(urlObj, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(dataStr),
+              },
+              timeout: 5000,
+            }, (res) => {
+              res.resume();
+              resolve();
+            });
+            req.on('error', reject);
+            req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+            req.write(dataStr);
+            req.end();
+          });
+          sent = true;
+          db.setSetting('cloud_backup_last', new Date().toISOString(), 'backup');
+          db.setSetting('cloud_backup_error', '', 'backup');
+        } catch (e) {
+          error = e.message;
+          db.setSetting('cloud_backup_error', e.message, 'backup');
+        }
+      }
+      db.logActivity(ctx.user.id, 'cloud_backup', 'system', null, { snap: snap.name, sent, error });
+      sendJson(ctx.res, 200, { ok: true, snapshot: snap.name, sent, error });
+    });
   },
 };

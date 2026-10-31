@@ -18,14 +18,23 @@ function resolveEdge() {
 }
 
 async function main() {
-  const port = Number(process.env.ZAIN_PORT || 4180);
-  const { port: p } = await start(port);
+  const port = Number(process.env.ZAIN_PORT || 4782);
+  const host = process.env.ZAIN_HOST || '0.0.0.0';
+  const { port: p } = await start(port, host);
   const url = `http://127.0.0.1:${p}`;
+  for (let i = 0; i < 50; i++) {
+    try {
+      const res = await fetch(url + '/');
+      if (res.ok) break;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 100));
+  }
   const exe = resolveEdge();
   const args = [`--app=${url}`, '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-dev-shm-usage'];
   if (exe) {
     console.log('Launching Zain ERP:', exe);
-    spawn(exe, args, { detached: true, stdio: 'ignore' }).unref();
+    const proc = spawn(exe, args, { stdio: 'ignore' });
+    proc.on('exit', () => process.exit(0));
   } else {
     console.log('Zain ERP running:', url);
     console.log('No Edge/Chrome found; open in your browser.');

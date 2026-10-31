@@ -8,7 +8,8 @@ const DATA_DIR = path.join(ROOT, 'data');
 const DB_PATH = process.env.ZAIN_DB || path.join(DATA_DIR, 'zain.db');
 const IMAGES_DIR = path.join(path.dirname(DB_PATH), 'images');
 const BACKUPS_DIR = path.join(path.dirname(DB_PATH), 'backups');
-const PORT = Number(process.env.ZAIN_PORT) || 4180;
+const PORT = Number(process.env.ZAIN_PORT) || 4782;
+const HOST = process.env.ZAIN_HOST || '127.0.0.1';
 
 const results = [];
 function report(level, label, detail = '') {
@@ -25,12 +26,12 @@ function bytes(n) {
   return `${v.toFixed(i ? 1 : 0)} ${units[i]}`;
 }
 
-function portFree(port) {
+function portFree(port, host = HOST) {
   return new Promise((resolve) => {
     const srv = net.createServer();
     srv.once('error', () => resolve(false));
     srv.once('listening', () => srv.close(() => resolve(true)));
-    srv.listen(port, '127.0.0.1');
+    srv.listen(port, host);
   });
 }
 
@@ -198,10 +199,10 @@ function portFree(port) {
   }
 
   try {
-    const free = await portFree(PORT);
-    report(free ? 'ok' : 'warn', `المنفذ ${PORT}`, free ? 'متاح' : 'مستخدم حالياً — قد يكون التطبيق يعمل بالفعل');
+    const free = await portFree(PORT, HOST);
+    report(free ? 'ok' : 'warn', `المنفذ ${PORT} (${HOST})`, free ? 'متاح' : 'مستخدم حالياً — قد يكون التطبيق يعمل بالفعل');
   } catch (err) {
-    report('warn', `المنفذ ${PORT}`, err.message);
+    report('warn', `المنفذ ${PORT} (${HOST})`, err.message);
   }
 
   const fails = results.filter((r) => r.level === 'fail').length;

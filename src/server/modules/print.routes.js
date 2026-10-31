@@ -226,11 +226,28 @@ module.exports = {
     });
 
     router.post('/api/print/labels', (ctx) => {
-      const items = (ctx.body || {}).items || [];
+      const b = ctx.body || {};
+      const items = b.items || [];
       const settings = db.getSettings();
-      const labelW = Number(settings.label_width_mm) || 40;
-      const labelH = Number(settings.label_height_mm) || 30;
-      const repeats = Math.max(1, Math.min(Number((ctx.body || {}).repeats) || 1, 50));
+      const labelW = Number(b.width_mm || settings.label_width_mm) || 40;
+      const labelH = Number(b.height_mm || settings.label_height_mm) || 30;
+      const defaultRepeats = Math.max(1, Math.min(Number(b.repeats) || 1, 50));
+      const rotation = [0, 90, 180, 270].includes(Number(b.rotate)) ? Number(b.rotate) : 0;
+      const isMirrored = !!b.mirror;
+      const isDual = !!b.dual;
+      const showBorder = b.show_border !== false && b.show_border !== 0 && b.show_border !== '0';
+      const showLogo = !!b.show_logo;
+      const showStoreName = !!b.show_store_name;
+      const showPrice = b.show_price !== false && b.show_price !== 0 && b.show_price !== '0';
+      const showDate = !!b.show_date;
+      const showSizeColor = !!b.show_size_color;
+      const showExpiry = !!b.show_expiry;
+      const showBundle = !!b.show_bundle;
+      const isSpecialOffer = !!b.special_offer;
+      const nameFontSize = Number(b.name_font_size) || (labelW <= 40 ? 9 : 11);
+      const priceFontSize = Number(b.price_font_size) || (labelW <= 40 ? 10 : 13);
+      const pageBreak = !!b.page_break;
+
       const labels = [];
       for (const item of items) {
         const p = item.product_id ? db.get('SELECT * FROM products WHERE id = ?', [item.product_id]) : null;
@@ -240,39 +257,81 @@ module.exports = {
         const price = Number((p && p.sale_price) || item.price || 0);
         const sku = (p && (p.part_number || p.sku)) || '';
         const image = (p && p.image) || '';
-        for (let r = 0; r < repeats; r++) {
-          labels.push({ code, name, price, sku, image });
+        const packageSize = (p && p.package_size) || '';
+        const brand = (p && p.brand) || '';
+        const expiryDate = (p && p.expiry_date) || '';
+        const shelf = (p && p.shelf_location) || '';
+        const units = (p && p.units) || '';
+        const itemRepeats = (b.use_stock_qty && p && Number(p.quantity) > 0)
+          ? Math.max(1, Math.min(Math.floor(Number(p.quantity)), 500))
+          : Math.max(1, Math.min(Number(item.repeats) || defaultRepeats, 500));
+
+        for (let r = 0; r < itemRepeats; r++) {
+          labels.push({ code, name, price, sku, image, packageSize, brand, expiryDate, shelf, units });
         }
       }
+
+      const transformCss = [];
+      if (rotation !== 0) transformCss.push(`rotate(${rotation}deg)`);
+      if (isMirrored) transformCss.push('scaleX(-1)');
+      const transformStyle = transformCss.length ? `transform: ${transformCss.join(' ')};` : '';
+
       const css = `
         * { box-sizing: border-box; }
         body { font-family: 'Cairo','Segoe UI',Tahoma,sans-serif; direction: rtl; margin: 0; padding: 6mm;
                display: flex; flex-wrap: wrap; gap: 4mm; background: #fff; }
-        .label { width: ${labelW}mm; height: ${labelH}mm; border: 1px dashed #cbd5e1; padding: 2mm;
-                 text-align: center; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; }
-        .label .name { font-size: 9px; font-weight: bold; color: #0f172a; line-height: 1.15; max-height: 22px; overflow: hidden; }
-        .label .head { display: flex; align-items: center; gap: 3mm; text-align: right; }
-        .label .head img { width: 10mm; height: 10mm; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 2mm; }
-        .label .sku { font-size: 7px; color: #64748b; }
-        .label .price { font-size: 10px; font-weight: bold; color: #4338ca; }
-        .label svg { display: block; margin: 0 auto; }
+        .label { width: ${labelW}mm; height: ${labelH}mm; border: ${showBorder ? '1px dashed #cbd5e1' : '0'}; padding: 2mm;
+                 text-align: center; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between;
+                 position: relative; background: #fff; ${transformStyle} }
+        .label.page-break { page-break-after: always; break-after: page; }
+        .label .name { font-size: ${nameFontSize}px; font-weight: bold; color: #0f172a; line-height: 1.15; max-height: 24px; overflow: hidden; }
+        .label .head { display: flex; align-items: center; gap: 2mm; text-align: right; justify-content: space-between; }
+        .label .head img { width: 9mm; height: 9mm; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 2mm; }
+        .label .store-name { font-size: 8px; font-weight: bold; color: #475569; }
+        .label .sku { font-size: 7px; color: #64748b; font-family: monospace; }
+        .label .price { font-size: ${priceFontSize}px; font-weight: bold; color: #4338ca; }
+        .label .meta-line { font-size: 7px; color: #64748b; display: flex; justify-content: space-between; gap: 4px; }
+        .label .special-badge { background: #ef4444; color: #fff; font-size: 7px; font-weight: bold; padding: 1px 4px; border-radius: 4px; display: inline-block; }
+        .label svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+        .dual-wrap { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
+        .dual-divider { border-top: 1px dashed #94a3b8; margin: 1mm 0; }
         .no-print { text-align: center; width: 100%; margin-bottom: 8px; }
         .no-print button { padding: 8px 18px; cursor: pointer; background: #6366f1; color: #fff; border: 0; border-radius: 8px; }
-        @media print { .no-print { display: none; } .label { border: 0; } }
+        @media print { .no-print { display: none; } .label { border: ${showBorder ? '1px solid #e2e8f0' : '0'}; } }
         @page { margin: 6mm; }
       `;
+
+      const renderOneSub = (l) => `
+        <div class="head">
+          <div class="flex items-center gap-1 min-w-0">
+            ${l.image ? `<img src="${esc(l.image)}" alt="" />` : ''}
+            <div>
+              ${showStoreName ? `<div class="store-name">${esc(settings.company_name || '')}</div>` : ''}
+              <div class="name">${esc(l.name)}</div>
+            </div>
+          </div>
+          ${showLogo && settings.print_logo_data ? `<img src="${esc(settings.print_logo_data)}" style="max-height:8mm;max-width:14mm;object-fit:contain" alt="" />` : ''}
+          ${isSpecialOffer ? `<span class="special-badge">عرض خاص</span>` : ''}
+        </div>
+        ${(showSizeColor && (l.packageSize || l.brand)) || l.sku || (showExpiry && l.expiryDate) ? `
+          <div class="meta-line">
+            <span>${l.sku ? esc(l.sku) : ''} ${showSizeColor && l.packageSize ? `(${esc(l.packageSize)})` : ''}</span>
+            <span>${showExpiry && l.expiryDate ? `صلاحية: ${esc(l.expiryDate)}` : ''}</span>
+          </div>` : ''}
+        <div>${code128.svg(l.code, { width: labelW * 3.4, height: isDual ? 28 : 44, moduleWidth: 1, showText: true, color: '#000' })}</div>
+        <div class="meta-line">
+          ${showDate ? `<span>${new Date().toLocaleDateString('ar-IQ')}</span>` : '<span></span>'}
+          ${showPrice ? `<div class="price">${money(l.price, settings.currency_symbol || 'د.ع')}</div>` : ''}
+        </div>
+        ${tpl.labelFooter(settings)}
+      `;
+
       const body = `
         <div class="no-print"><button onclick="window.print()">طباعة الملصقات (${labels.length})</button></div>
         ${labels
-          .map(
-            (l) => `<div class="label">
-              <div class="head">${l.image ? `<img src="${esc(l.image)}" alt="" />` : ''}<div class="name">${esc(l.name)}</div></div>
-              ${l.sku ? `<div class="sku">${esc(l.sku)}</div>` : ''}
-              <div>${code128.svg(l.code, { width: labelW * 3.4, height: 46, moduleWidth: 1, showText: true, color: '#000' })}</div>
-              <div class="price">${money(l.price, settings.currency_symbol || 'د.ع')}</div>
-              ${tpl.labelFooter(settings)}
-            </div>`
-          )
+          .map((l) => `<div class="label ${pageBreak ? 'page-break' : ''}">
+            ${isDual ? `<div class="dual-wrap"><div>${renderOneSub(l)}</div><div class="dual-divider"></div><div>${renderOneSub(l)}</div></div>` : renderOneSub(l)}
+          </div>`)
           .join('')}
       `;
       sendText(ctx.res, 200, htmlDoc('ملصقات الباركود', css + tpl.extraCss(settings, false), body), 'text/html; charset=utf-8');
@@ -503,6 +562,60 @@ module.exports = {
           <div style="text-align:left">مدير المبيعات: ....................</div>
         </footer>`;
       sendText(ctx.res, 200, htmlDoc('تقرير Z', A4_CSS, body), 'text/html; charset=utf-8');
+    });
+
+    router.get('/api/print/zakat', (ctx) => {
+      const data = accounting.buildZakatReport(ctx.query);
+      const settings = db.getSettings();
+      const cur = settings.currency_symbol || 'د.ع';
+      const body = `
+        <header>
+          <div>
+            <h1>${esc(settings.company_name || 'Zain ERP')}</h1>
+            <div style="font-size:13px;color:#475569;margin-top:6px">
+              ${esc(settings.company_address || '')}<br/>
+              ${settings.company_phone ? 'هاتف: ' + esc(settings.company_phone) : ''}
+            </div>
+          </div>
+          <div class="meta">
+            <span class="badge">تقرير الزكاة</span><br/><br/>
+            وقت الإصدار: ${esc(data.generated_at)}
+          </div>
+        </header>
+        <div class="cards">
+          <div class="box"><div class="lbl">صافي المال الزكوي</div><div class="val">${money(data.net_assets, cur)}</div></div>
+          <div class="box"><div class="lbl">قيمة النصاب</div><div class="val">${money(data.nisab.value, cur)}</div></div>
+          <div class="box"><div class="lbl">الزكاة المستحقة (${data.rate}%)</div><div class="val" style="color:#059669">${money(data.zakat_due, cur)}</div></div>
+        </div>
+        <h2 style="font-size:16px;margin:8px 0">الوعاء الزكوي</h2>
+        <table class="items">
+          <thead><tr><th>البند</th><th style="text-align:left">المبلغ</th></tr></thead>
+          <tbody>
+            <tr><td>النقد بالخزنة</td><td style="text-align:left">${money(data.assets.cash, '')}</td></tr>
+            <tr><td>قيمة المخزون (تكلفة)</td><td style="text-align:left">${money(data.assets.inventory_cost, '')}</td></tr>
+            <tr><td>القمم المدينة</td><td style="text-align:left">${money(data.assets.receivables, '')}</td></tr>
+            <tr><td>إجمالي الأصول الزكوية</td><td style="text-align:left"><b>${money(data.assets.gross, '')}</b></td></tr>
+            <tr><td>القمم الدائنة (تُخصم)</td><td style="text-align:left;color:#e11d48">-${money(data.liabilities, '')}</td></tr>
+            <tr><td><b>صافي المال الزكوي</b></td><td style="text-align:left"><b>${money(data.net_assets, '')}</b></td></tr>
+            <tr><td>النصاب (${data.nisab.grams} غم × ${money(data.nisab.gold_price, '')})</td><td style="text-align:left">${money(data.nisab.value, '')}</td></tr>
+            <tr><td>بلوغ النصاب</td><td style="text-align:left">${data.nisab.reached ? 'نعم' : 'لا'}</td></tr>
+            <tr><td><b>الزكاة المستحقة (${data.rate}%)</b></td><td style="text-align:left;color:#059669"><b>${money(data.zakat_due, '')}</b></td></tr>
+          </tbody>
+        </table>
+        <h2 style="font-size:16px;margin:22px 0 8px">تفاصيل المخزون</h2>
+        <table class="items">
+          <thead><tr><th>البند</th><th style="text-align:left">المبلغ</th></tr></thead>
+          <tbody>
+            <tr><td>قيمة المخزون بالتكلفة</td><td style="text-align:left">${money(data.assets.inventory_cost, '')}</td></tr>
+            <tr><td>قيمة المخزون بسعر البيع</td><td style="text-align:left">${money(data.assets.inventory_sale, '')}</td></tr>
+            <tr><td>رصيد الخزنة الحالي</td><td style="text-align:left">${money(data.treasury_balance, '')}</td></tr>
+          </tbody>
+        </table>
+        <footer>
+          <div>${esc(settings.receipt_footer || '')}</div>
+          <div style="text-align:left">المحاسب: ....................</div>
+        </footer>`;
+      sendText(ctx.res, 200, htmlDoc('تقرير الزكاة', A4_CSS, body), 'text/html; charset=utf-8');
     });
 
     router.get('/api/print/inventory', (ctx) => {
