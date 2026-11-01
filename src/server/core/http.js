@@ -144,7 +144,9 @@ function serveStatic(res, baseDir, pathname) {
   res.writeHead(200, {
     'Content-Type': type,
     'Content-Length': stat.size,
-    'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=3600',
+    'Cache-Control': ['html', 'js', 'mjs', 'css', 'json'].includes(ext.slice(1))
+      ? 'no-cache, no-store, must-revalidate'
+      : 'public, max-age=3600',
   });
   fs.createReadStream(filePath).pipe(res);
   return true;

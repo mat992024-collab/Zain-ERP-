@@ -9,6 +9,7 @@
     "build:css": "tailwindcss -i ./src/web/styles.css -o ./src/web/assets/app.css --minify",
     "watch:css": "tailwindcss -i ./src/web/styles.css -o ./src/web/assets/app.css --watch",
     "start": "node src/launcher.js",
+    "dev": "node --watch src/server/index.js",
     "serve": "node src/server/index.js",
     "seed": "node src/server/seed.js",
     "reset": "node src/server/reset.js",
