@@ -80,6 +80,7 @@ async function main() {
   const adm = await import('../src/web/js/views/admin.js');
   const act = await import('../src/web/js/views/activity.js');
   const sea = await import('../src/web/js/views/search.js');
+  const wo = await import('../src/web/js/views/work_orders.js');
 
   const jobs = [
     ['pos.render', render],
@@ -96,6 +97,7 @@ async function main() {
     ['admin.renderAdmin', adm.renderAdmin],
     ['activity.renderActivity', act.renderActivity],
     ['search.openSearchPalette', sea.openSearchPalette],
+    ['work_orders.renderWorkOrders', wo.renderWorkOrders],
   ];
 
   let pass = 0, fail = 0;

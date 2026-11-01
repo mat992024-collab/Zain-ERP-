@@ -9,9 +9,11 @@ import { renderAdmin, openSettings } from './views/admin.js';
 import { renderReminders } from './views/reminders.js';
 import { renderActivity } from './views/activity.js';
 import { openSearchPalette } from './views/search.js';
+import { renderWorkOrders } from './views/work_orders.js';
 
 const NAV = [
   { key: 'dashboard', name: 'لوحة التحكم', icon: 'bi-speedometer2', perm: null, route: 'dashboard' },
+  { key: 'work-orders', name: 'أوامر الشغل والطباعة', icon: 'bi-printer', perm: null, route: 'work-orders' },
   { key: 'pos', name: 'نقاط البيع', icon: 'bi-cart-check', perm: 'pos.sell', module: 'pos', route: 'pos' },
   { key: 'sales', name: 'فواتير البيع', icon: 'bi-receipt', perm: 'sales.write', module: 'pos', route: 'sales' },
   { key: 'purchases', name: 'المشتريات', icon: 'bi-bag-plus', perm: 'purchases.write', module: 'inventory', route: 'purchases' },
@@ -29,6 +31,7 @@ const NAV = [
 
 const ROUTES = {
   dashboard: renderDashboard,
+  'work-orders': renderWorkOrders,
   pos: (c) => Pos.render(c),
   sales: renderSales,
   purchases: renderPurchases,
@@ -205,21 +208,60 @@ async function logout() {
 
 function shiftAction() {
   if (state.shift) {
+    const expected = Number(state.shift.expected_cash) || 0;
     modal({
-      title: 'إغلاق الوردية',
-      size: 'max-w-sm',
-      body: `${field('المتوقع في الصندوق', `<input class="field" value="${money(state.shift.expected_cash)}" readonly />`)}
-        ${field('النقد المعدود عند الإغلاق', `<input id="clBalance" type="number" class="field" value="${Number(state.shift.expected_cash).toFixed(0)}" />`)}
-        ${field('ملاحظات', '<input id="clNotes" class="field" />')}`,
-      footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="clSave" class="btn btn-danger">إغلاق الوردية</button>`,
+      title: 'إغلاق الوردية ومطابقة النقدية',
+      size: 'max-w-md',
+      body: `
+        <div class="space-y-3 text-xs">
+          <div class="p-3 bg-[var(--color-bg)] rounded-lg flex items-center justify-between border border-[var(--color-border)]">
+            <span class="text-[var(--color-text-mute)]">النقدية المتوقعة في الدرج:</span>
+            <strong class="font-mono text-sm font-bold text-[var(--color-primary)]">${money(expected)}</strong>
+          </div>
+          ${field('النقد الفعلي المعدود في الدرج *', `<input id="clBalance" type="number" step="0.01" class="field w-full font-mono font-bold text-sm" value="${expected.toFixed(0)}" />`)}
+          <div id="clDiffBadge" class="text-xs font-bold text-emerald-600 text-center py-1">الدرج مطابق ✓</div>
+          ${field('ملاحظات وتبرير العجز (مطلوبة عند وجود عجز) *', '<textarea id="clNotes" rows="2" class="field w-full" placeholder="اكتب سبب العجز إن وُجد أو أي ملاحظات تخص الوردية..."></textarea>')}
+        </div>`,
+      footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="clSave" class="btn btn-danger flex items-center gap-1.5"><i class="bi bi-lock-fill"></i> تأكيد الإغلاق وإرسال التقرير</button>`,
       onMount(wrap, close) {
+        const balIn = wrap.querySelector('#clBalance');
+        const diffBadge = wrap.querySelector('#clDiffBadge');
+        const notesIn = wrap.querySelector('#clNotes');
+
+        const updateDiff = () => {
+          const actual = Number(balIn.value) || 0;
+          const diff = actual - expected;
+          if (diff < -0.01) {
+            diffBadge.className = 'text-xs font-bold text-rose-500 text-center py-1 bg-rose-50 dark:bg-rose-950/30 rounded';
+            diffBadge.textContent = `يوجد عجز بقيمة ${money(-diff)} — كتابة سبب العجز مطلوبة أدناه`;
+          } else if (diff > 0.01) {
+            diffBadge.className = 'text-xs font-bold text-blue-500 text-center py-1 bg-blue-50 dark:bg-blue-950/30 rounded';
+            diffBadge.textContent = `يوجد زيادة في الدرج بقيمة ${money(diff)}`;
+          } else {
+            diffBadge.className = 'text-xs font-bold text-emerald-600 text-center py-1 bg-emerald-50 dark:bg-emerald-950/30 rounded';
+            diffBadge.textContent = 'الدرج مطابق تماماً للحسابات ✓';
+          }
+        };
+
+        balIn.addEventListener('input', updateDiff);
         wrap.querySelector('[data-cancel]').addEventListener('click', close);
         wrap.querySelector('#clSave').addEventListener('click', async () => {
+          const actual = Number(balIn.value) || 0;
+          const notes = notesIn.value.trim();
+          if (actual < expected - 0.01 && !notes) {
+            toast('يوجد عجز في الخزينة: يرجى كتابة سبب العجز في الملاحظات قبل الإغلاق', 'error');
+            notesIn.focus();
+            return;
+          }
           try {
-            const closeRes = await api('POST', `/api/shifts/${state.shift.id}/close`, { closing_balance: Number(wrap.querySelector('#clBalance').value), notes: wrap.querySelector('#clNotes').value });
-            toast('تم إغلاق الوردية', 'success'); close(); await refreshShift();
+            const closeRes = await api('POST', `/api/shifts/${state.shift.id}/close`, { closing_balance: actual, notes });
+            toast('تم إغلاق الوردية بنجاح', 'success');
+            close();
+            await refreshShift();
             if (closeRes && closeRes.whatsapp) openShiftWhatsAppModal(closeRes.whatsapp);
-          } catch (e) { toast(e.message, 'error'); }
+          } catch (e) {
+            toast(e.message, 'error');
+          }
         });
       },
     });
@@ -244,53 +286,152 @@ function shiftAction() {
   }
 }
 
+let activeDashBranch = 'all';
+
 async function renderDashboard(c) {
-  const d = await api('GET', '/api/dashboard/overview');
+  const q = activeDashBranch !== 'all' ? `?branch=${encodeURIComponent(activeDashBranch)}` : '';
+  const d = await api('GET', `/api/dashboard/overview${q}`);
   const reminders = hasPerm('reminders.view') ? await api('GET', '/api/reminders/daily').catch(() => null) : null;
-  const maxDay = Math.max(1, ...d.charts.map((x) => Number(x.total)));
+  const maxDay = Math.max(1, ...(d.charts || []).map((x) => Number(x.total)));
+
   c.innerHTML = `
-    <div class="kpi-row">
-      <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-cart-check"></i></div><div><div class="kpi-value">${money(d.sales_today)}</div><div class="kpi-label">مبيعات اليوم (${num(d.sales_today_count)})</div></div></div>
-      <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-wallet2"></i></div><div><div class="kpi-value">${money(d.cash_balance)}</div><div class="kpi-label">رصيد الخزنة</div></div></div>
-      <div class="kpi"><div class="kpi-icon bg-indigo-100 text-indigo-700"><i class="bi bi-calendar-month"></i></div><div><div class="kpi-value">${money(d.sales_month)}</div><div class="kpi-label">مبيعات الشهر</div></div></div>
-      <div class="kpi"><div class="kpi-icon bg-rose-100 text-rose-700"><i class="bi bi-exclamation-triangle"></i></div><div><div class="kpi-value">${num(d.low_stock)}</div><div class="kpi-label">أصناف منخفضة</div></div></div>
-    </div>
-    <div class="kpi-row">
-      <div class="kpi"><div class="kpi-icon bg-slate-100 text-slate-600"><i class="bi bi-box-seam"></i></div><div><div class="kpi-value">${money(d.stock_value)}</div><div class="kpi-label">قيمة المخزون</div></div></div>
-      <div class="kpi"><div class="kpi-icon bg-amber-100 text-amber-700"><i class="bi bi-person-lines-fill"></i></div><div><div class="kpi-value">${money(d.debtors)}</div><div class="kpi-label">ديون العملاء</div></div></div>
-      <div class="kpi"><div class="kpi-icon bg-cyan-100 text-cyan-700"><i class="bi bi-truck"></i></div><div><div class="kpi-value">${money(d.creditors)}</div><div class="kpi-label">مستحقات الموردين</div></div></div>
-      <div class="kpi"><div class="kpi-icon bg-rose-100 text-rose-700"><i class="bi bi-receipt-cutoff"></i></div><div><div class="kpi-value">${money(d.expenses_today)}</div><div class="kpi-label">مصروفات اليوم</div></div></div>
-    </div>
-    ${reminders ? `<div class="card p-4 mb-4 border-r-4 border-r-zain-500 flex items-center justify-between flex-wrap gap-3">
-      <div class="flex items-center gap-3">
-        <i class="bi bi-megaphone text-2xl text-zain-600"></i>
+    <div class="space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-[var(--color-border)]">
         <div>
-          <div class="font-black">تذكير اليوم — ${esc(reminders.date)}</div>
-          <div class="text-xs text-slate-500 mt-0.5">
-            ${reminders.sections.length ? reminders.sections.map((s) => `<span class="badge badge-mute mr-1">${esc(s.title)}: ${s.items.length}</span>`).join('') : 'لا توجد تنبيهات اليوم'}
+          <h2 class="text-xl font-black">لوحة التحكم ومتابعة الفروع</h2>
+          <p class="text-xs text-[var(--color-text-mute)] mt-0.5">مؤشرات الأداء اللحظية، صافي الأرباح، وأوامر الشغل</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-bold text-[var(--color-text-mute)]"><i class="bi bi-geo-alt me-1"></i>عرض فرع:</span>
+          <select id="dashBranchSel" class="field text-xs font-bold py-1 px-3">
+            <option value="all" ${activeDashBranch === 'all' ? 'selected' : ''}>جميع الفروع (مقارنة شاملة)</option>
+            ${(d.branches || []).map((b) => `<option value="${esc(b.name)}" ${activeDashBranch === b.name ? 'selected' : ''}>${esc(b.name)} (${esc(b.code)})</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      ${d.branches && d.branches.length > 1 && activeDashBranch === 'all' ? `
+        <div class="space-y-2">
+          <div class="text-xs font-black text-[var(--color-text-mute)] flex items-center gap-1.5">
+            <i class="bi bi-arrow-left-right text-[var(--color-primary)]"></i>
+            <span>مقارنة أداء الفرعين اليوم</span>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            ${d.branches.map((b) => `
+              <div class="card p-4 space-y-3 border-t-4 border-t-[var(--color-primary)]">
+                <div class="flex items-center justify-between pb-2 border-b border-[var(--color-border)]">
+                  <div class="flex items-center gap-2">
+                    <span class="badge badge-info font-bold">${esc(b.code)}</span>
+                    <strong class="text-sm font-black">${esc(b.name)}</strong>
+                  </div>
+                  <span class="badge badge-ok text-[11px] font-mono">${num(b.sales_today_count)} فواتير اليوم</span>
+                </div>
+                <div class="grid grid-cols-2 gap-3 text-xs">
+                  <div class="p-2.5 rounded-lg bg-[var(--color-bg)]">
+                    <div class="text-[var(--color-text-mute)] text-[11px]">مبيعات اليوم</div>
+                    <div class="text-base font-black text-[var(--color-primary)] mt-0.5">${money(b.sales_today)}</div>
+                  </div>
+                  <div class="p-2.5 rounded-lg bg-[var(--color-bg)]">
+                    <div class="text-[var(--color-text-mute)] text-[11px]">صافي أرباح اليوم</div>
+                    <div class="text-base font-black text-emerald-600 mt-0.5">${money(b.profit_today)}</div>
+                  </div>
+                  <div class="p-2.5 rounded-lg bg-[var(--color-bg)]">
+                    <div class="text-[var(--color-text-mute)] text-[11px]">مبيعات الشهر</div>
+                    <div class="text-sm font-black text-[var(--color-text)] mt-0.5">${money(b.sales_month)}</div>
+                  </div>
+                  <div class="p-2.5 rounded-lg bg-[var(--color-bg)]">
+                    <div class="text-[var(--color-text-mute)] text-[11px]">أوامر الشغل الحية</div>
+                    <div class="text-sm font-black text-amber-600 mt-0.5">${num((b.work_orders && b.work_orders.in_progress) || 0)} قيد التنفيذ · ${num((b.work_orders && b.work_orders.ready) || 0)} جاهز</div>
+                  </div>
+                </div>
+                ${b.top_products && b.top_products.length ? `
+                  <div class="pt-2 border-t border-[var(--color-border)]">
+                    <div class="text-[11px] font-bold text-[var(--color-text-mute)] mb-1">الأكثر مبيعاً في الفرع:</div>
+                    <div class="flex flex-wrap gap-1.5">
+                      ${b.top_products.slice(0, 3).map((p) => `<span class="badge badge-mute text-[10px]">${esc(p.name)} (${num(p.total_qty)})</span>`).join('')}
+                    </div>
+                  </div>
+                ` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="kpi-row">
+        <div class="kpi"><div class="kpi-icon bg-zain-100 text-zain-700"><i class="bi bi-cart-check"></i></div><div><div class="kpi-value">${money(d.sales_today)}</div><div class="kpi-label">مبيعات اليوم (${num(d.sales_today_count)})</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-emerald-100 text-emerald-700"><i class="bi bi-graph-up-arrow"></i></div><div><div class="kpi-value">${money(d.profit_today || 0)}</div><div class="kpi-label">صافي أرباح اليوم</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-indigo-100 text-indigo-700"><i class="bi bi-calendar-month"></i></div><div><div class="kpi-value">${money(d.sales_month)}</div><div class="kpi-label">مبيعات الشهر</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-amber-100 text-amber-700"><i class="bi bi-clock-history"></i></div><div><div class="kpi-value">${num((d.work_orders_summary && d.work_orders_summary.in_progress) || 0)}</div><div class="kpi-label">أوامر قيد التنفيذ</div></div></div>
+      </div>
+
+      <div class="kpi-row">
+        <div class="kpi"><div class="kpi-icon bg-teal-100 text-teal-700"><i class="bi bi-bell"></i></div><div><div class="kpi-value">${num((d.work_orders_summary && d.work_orders_summary.ready) || 0)}</div><div class="kpi-label">أوامر جاهزة للتسليم</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-rose-100 text-rose-700"><i class="bi bi-person-lines-fill"></i></div><div><div class="kpi-value">${money(d.debtors)}</div><div class="kpi-label">ديون العملاء</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-cyan-100 text-cyan-700"><i class="bi bi-truck"></i></div><div><div class="kpi-value">${money(d.creditors)}</div><div class="kpi-label">مستحقات الموردين</div></div></div>
+        <div class="kpi"><div class="kpi-icon bg-rose-100 text-rose-700"><i class="bi bi-receipt-cutoff"></i></div><div><div class="kpi-value">${money(d.expenses_today)}</div><div class="kpi-label">مصروفات اليوم</div></div></div>
+      </div>
+
+      ${reminders ? `
+        <div class="card p-4 border-r-4 border-r-zain-500 flex items-center justify-between flex-wrap gap-3">
+          <div class="flex items-center gap-3">
+            <i class="bi bi-megaphone text-2xl text-zain-600"></i>
+            <div>
+              <div class="font-black">تذكير اليوم — ${esc(reminders.date)}</div>
+              <div class="text-xs text-slate-500 mt-0.5">
+                ${reminders.sections.length ? reminders.sections.map((s) => `<span class="badge badge-mute mr-1">${esc(s.title)}: ${s.items.length}</span>`).join('') : 'لا توجد تنبيهات اليوم'}
+              </div>
+            </div>
+          </div>
+          <a href="#/reminders" class="btn btn-primary btn-sm"><i class="bi bi-arrow-left-circle"></i> عرض التذكير</a>
+        </div>
+      ` : ''}
+
+      <div class="grid grid-cols-12 gap-4">
+        <div class="col-span-12 lg:col-span-7 card p-4">
+          <div class="font-black mb-4 flex items-center gap-2"><i class="bi bi-bar-chart text-zain-600"></i> مبيعات آخر 7 أيام</div>
+          <div class="flex items-end gap-3 h-52">
+            ${d.charts && d.charts.length ? d.charts.map((x) => `
+              <div class="flex-1 flex flex-col items-center justify-end gap-1 group" title="${money(x.total)}">
+                <span class="text-[10px] text-slate-400 opacity-0 group-hover:opacity-100">${money(x.total, '')}</span>
+                <div class="w-full bg-gradient-to-t from-zain-600 to-indigo-400 rounded-t-lg transition hover:brightness-110" style="height:${Math.max(4, (Number(x.total) / maxDay) * 100)}%"></div>
+                <span class="text-[10px] text-slate-400 font-mono">${esc(String(x.day).slice(5))}</span>
+              </div>
+            `).join('') : '<div class="w-full text-center text-slate-400 py-12">لا توجد مبيعات في الفترة المحددة</div>'}
+          </div>
+        </div>
+        <div class="col-span-12 lg:col-span-5 card">
+          <div class="p-4 border-b border-slate-100 font-black flex items-center justify-between">
+            <span>أحدث الفواتير</span>
+            <a href="#/sales" class="text-xs font-bold text-[var(--color-primary)]">عرض الكل</a>
+          </div>
+          <div class="overflow-auto max-h-[46vh]">
+            <table class="w-full text-xs">
+              <thead><tr><th class="th">الفاتورة</th><th class="th">العميل</th><th class="th">الفرع</th><th class="th">الإجمالي</th></tr></thead>
+              <tbody>
+                ${d.recent && d.recent.length ? d.recent.map((r) => `
+                  <tr class="tr">
+                    <td class="td font-mono font-bold text-zain-700">${esc(r.invoice_no)}</td>
+                    <td class="td font-semibold">${esc(r.customer_name || 'نقدي')}</td>
+                    <td class="td"><span class="badge badge-mute text-[10px]">${esc(r.branch || 'الرئيسي')}</span></td>
+                    <td class="td font-bold">${money(r.total)}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="4" class="td text-center text-slate-400 py-8">لا توجد فواتير</td></tr>'}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
-      <a href="#/reminders" class="btn btn-primary btn-sm"><i class="bi bi-arrow-left-circle"></i> عرض التذكير</a>
-    </div>` : ''}
-    <div class="grid grid-cols-12 gap-4">
-      <div class="col-span-7 card p-4">
-        <div class="font-black mb-4 flex items-center gap-2"><i class="bi bi-bar-chart text-zain-600"></i> مبيعات آخر 7 أيام</div>
-        <div class="flex items-end gap-3 h-52">
-          ${d.charts.length ? d.charts.map((x) => `<div class="flex-1 flex flex-col items-center justify-end gap-1 group" title="${money(x.total)}">
-            <span class="text-[10px] text-slate-400 opacity-0 group-hover:opacity-100">${money(x.total, '')}</span>
-            <div class="w-full bg-gradient-to-t from-zain-600 to-indigo-400 rounded-t-lg" style="height:${Math.max(4, (Number(x.total) / maxDay) * 100)}%"></div>
-            <span class="text-[10px] text-slate-400">${esc(String(x.day).slice(5))}</span></div>`).join('') : '<div class="w-full text-center text-slate-400">لا توجد مبيعات</div>'}
-        </div>
-      </div>
-      <div class="col-span-5 card">
-        <div class="p-4 border-b border-slate-100 font-black">أحدث الفواتير</div>
-        <div class="overflow-auto max-h-[46vh]"><table class="w-full">
-          <thead><tr><th class="th">الفاتورة</th><th class="th">العميل</th><th class="th">الإجمالي</th></tr></thead>
-          <tbody>${d.recent.length ? d.recent.map((r) => `<tr class="tr"><td class="td font-mono text-xs font-bold text-zain-700">${esc(r.invoice_no)}</td><td class="td">${esc(r.customer_name || 'نقدي')}</td><td class="td font-bold">${money(r.total)}</td></tr>`).join('') : '<tr><td colspan="3" class="td text-center text-slate-400 py-8">لا توجد فواتير</td></tr>'}</tbody>
-        </table></div>
-      </div>
-    </div>`;
+    </div>
+  `;
+
+  const bSel = c.querySelector('#dashBranchSel');
+  if (bSel) {
+    bSel.addEventListener('change', (e) => {
+      activeDashBranch = e.target.value;
+      renderDashboard(c);
+    });
+  }
 }
 
 function currentBranch() {

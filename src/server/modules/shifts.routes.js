@@ -158,10 +158,16 @@ module.exports = {
       const summary = shiftSummary(shift);
       const closing = Number((ctx.body || {}).closing_balance);
       const closingBalance = Number.isFinite(closing) ? closing : summary.expected_cash;
+      const notes = (ctx.body || {}).notes ? String(ctx.body.notes).trim() : '';
+
+      if (closingBalance < summary.expected_cash - 0.01 && !notes) {
+        throw new HttpError(400, 'يوجد عجز في الخزينة: يجب كتابة سبب وتبرير العجز في الملاحظات قبل الإغلاق');
+      }
+
       db.run(
         `UPDATE shifts SET status='closed', closed_at=datetime('now','localtime'),
            closing_balance=?, expected_cash=?, notes = COALESCE(?, notes) WHERE id = ?`,
-        [closingBalance, summary.expected_cash, (ctx.body || {}).notes || null, shift.id]
+        [closingBalance, summary.expected_cash, notes || null, shift.id]
       );
       db.logActivity(ctx.user.id, 'shift_close', 'shifts', shift.id, { closingBalance, expected: summary.expected_cash });
       const closedShift = shiftSummary(db.get('SELECT * FROM shifts WHERE id = ?', [shift.id]));

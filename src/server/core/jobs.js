@@ -87,12 +87,45 @@ function runScheduledInvoices() {
   }
 }
 
+function checkOfflineBranches() {
+  try {
+    const branches = db.all('SELECT * FROM branches WHERE is_active = 1');
+    const now = new Date();
+    for (const b of branches) {
+      const lastShift = db.get('SELECT closed_at, opened_at FROM shifts WHERE branch = ? ORDER BY id DESC LIMIT 1', [b.name]);
+      const lastTimeStr = (lastShift && (lastShift.closed_at || lastShift.opened_at)) || b.updated_at;
+      if (lastTimeStr) {
+        const lastTime = new Date(lastTimeStr.replace(' ', 'T'));
+        const diffHours = (now - lastTime) / (1000 * 60 * 60);
+        if (diffHours >= 2) {
+          const alreadyLogged = db.get(
+            `SELECT id FROM activity_log 
+             WHERE action = 'branch_offline_alert' AND entity_id = ? 
+               AND date(created_at) = date('now','localtime')`,
+            [b.id]
+          );
+          if (!alreadyLogged) {
+            db.logActivity(null, 'branch_offline_alert', 'branches', b.id, {
+              branch: b.name,
+              hours_offline: Math.round(diffHours),
+              message: `تنبيه: ${b.name} غير متصل منذ أكثر من ساعتين`
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[zain] offline branch check failed:', err.message);
+  }
+}
+
 function tick() {
   runAutoBackup();
   runDailyDigest();
   runScheduledInvoices();
   markOverdueInstallments();
   cloudSync.syncNow().catch(() => {});
+  checkOfflineBranches();
 }
 
 function start() {

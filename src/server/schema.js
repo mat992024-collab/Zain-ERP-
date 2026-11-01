@@ -411,6 +411,70 @@ CREATE TABLE IF NOT EXISTS sync_queue (
   synced_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS branches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  phone TEXT,
+  address TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS work_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_no TEXT NOT NULL UNIQUE,
+  customer_id INTEGER,
+  customer_name TEXT NOT NULL,
+  customer_phone TEXT,
+  title TEXT NOT NULL,
+  description TEXT,
+  material TEXT,
+  width REAL DEFAULT 0,
+  height REAL DEFAULT 0,
+  quantity REAL NOT NULL DEFAULT 1,
+  total_area REAL DEFAULT 0,
+  unit_cost REAL NOT NULL DEFAULT 0,
+  unit_price REAL NOT NULL DEFAULT 0,
+  total_cost REAL NOT NULL DEFAULT 0,
+  total_price REAL NOT NULL DEFAULT 0,
+  deposit REAL NOT NULL DEFAULT 0,
+  remaining REAL NOT NULL DEFAULT 0,
+  priority TEXT NOT NULL DEFAULT 'normal',
+  status TEXT NOT NULL DEFAULT 'in_progress',
+  receive_date TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  delivery_date TEXT,
+  design_file TEXT,
+  design_thumbnail TEXT,
+  branch_id INTEGER,
+  branch_name TEXT NOT NULL DEFAULT 'الفرع الرئيسي',
+  created_by INTEGER,
+  assigned_worker INTEGER,
+  invoice_id INTEGER,
+  transferred_from_branch TEXT,
+  transferred_at TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (assigned_worker) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS work_order_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_order_id INTEGER NOT NULL,
+  user_id INTEGER,
+  from_status TEXT,
+  to_status TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at);
@@ -421,6 +485,9 @@ CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(produc
 CREATE INDEX IF NOT EXISTS idx_treasury_created ON treasury(created_at);
 CREATE INDEX IF NOT EXISTS idx_account_entries_account ON account_entries(account_id);
 CREATE INDEX IF NOT EXISTS idx_sync_queue_status ON sync_queue(status);
+CREATE INDEX IF NOT EXISTS idx_work_orders_status ON work_orders(status);
+CREATE INDEX IF NOT EXISTS idx_work_orders_branch ON work_orders(branch_name);
+CREATE INDEX IF NOT EXISTS idx_work_orders_customer ON work_orders(customer_id);
 `;
 
 const DEFAULT_SETTINGS = [

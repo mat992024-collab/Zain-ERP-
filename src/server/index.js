@@ -33,6 +33,8 @@ const MODULES = [
   require('./modules/scheduled.routes'),
   require('./modules/sync.routes'),
   require('./modules/license.routes'),
+  require('./modules/branches.routes'),
+  require('./modules/work_orders.routes'),
 ];
 
 function buildRouter() {

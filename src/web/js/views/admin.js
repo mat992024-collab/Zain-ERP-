@@ -28,6 +28,7 @@ export async function renderAdmin(c) {
   const canSettings = hasPerm('settings.write');
   const backup = canBackup ? await api('GET', '/api/backup').catch(() => ({ backups: [], db_size: 0 })) : { backups: [], db_size: 0 };
   const currencyData = canSettings ? await api('GET', '/api/currencies').catch(() => ({ rows: [], base: null })) : { rows: [], base: null };
+  const branchesData = await api('GET', '/api/branches').catch(() => ({ rows: [] }));
 
   c.innerHTML = `
     <div class="card">
@@ -52,6 +53,7 @@ export async function renderAdmin(c) {
         </tr>`).join('')}</tbody>
       </table></div>
     </div>
+    ${branchesCard(branchesData)}
     ${canSettings ? currencyCard(currencyData) : ''}
     <div class="card p-4">
       <div class="font-black mb-2"><i class="bi bi-info-circle text-zain-600"></i> ملاحظة</div>
@@ -77,6 +79,28 @@ export async function renderAdmin(c) {
     const u = data.rows.find((x) => x.id === +b.dataset.toggle);
     if (!(await confirmBox(`${u.is_active ? 'تعطيل' : 'تفعيل'} المستخدم ${u.full_name}؟`))) return;
     try { await api('PATCH', `/api/users/${u.id}/status`, { is_active: u.is_active ? 0 : 1 }); toast('تم', 'success'); renderAdmin(c); } catch (e) { toast(e.message, 'error'); }
+  }));
+
+  const bAdd = c.querySelector('#branchAddBtn');
+  if (bAdd) bAdd.addEventListener('click', () => branchForm(null));
+  c.querySelectorAll('[data-b-edit]').forEach((b) => b.addEventListener('click', () => branchForm(branchesData.rows.find((x) => x.id === +b.dataset.bEdit))));
+  c.querySelectorAll('[data-b-toggle]').forEach((b) => b.addEventListener('click', async () => {
+    const br = branchesData.rows.find((x) => x.id === +b.dataset.bToggle);
+    if (!br) return;
+    try {
+      await api('PUT', `/api/branches/${br.id}`, { is_active: br.is_active ? 0 : 1 });
+      toast('تم تحديث حالة الفرع', 'success');
+      renderAdmin(c);
+    } catch (e) { toast(e.message, 'error'); }
+  }));
+  c.querySelectorAll('[data-b-del]').forEach((b) => b.addEventListener('click', async () => {
+    const id = b.dataset.bDel;
+    if (!(await confirmBox('هل أنت متأكد من حذف هذا الفرع؟ (متاح فقط إذا كان الفرع لا يحتوي على فواتير أو أوامر شغل سابقة).'))) return;
+    try {
+      await api('DELETE', `/api/branches/${id}`);
+      toast('تم حذف الفرع بنجاح', 'success');
+      renderAdmin(c);
+    } catch (e) { toast(e.message, 'error'); }
   }));
 
   const bkCreate = c.querySelector('#bkCreate');
@@ -208,6 +232,85 @@ export async function renderAdmin(c) {
       },
     });
   });
+
+  function branchesCard(bData) {
+    const rows = bData.rows || [];
+    return `
+      <div class="card mt-4" id="branchesCard">
+        <div class="p-4 flex flex-wrap justify-between items-center gap-2 border-b border-slate-100">
+          <div>
+            <div class="font-black flex items-center gap-2"><i class="bi bi-geo-alt-fill text-zain-600"></i> إدارة الفروع المستقلة</div>
+            <p class="text-xs text-slate-500 mt-0.5">التحكم في فروع المطبعة، مسمياتها، وأكوادها لربط الكاشير والمبيعات</p>
+          </div>
+          <button id="branchAddBtn" class="btn btn-primary btn-sm flex items-center gap-1.5"><i class="bi bi-plus-lg"></i> فرع جديد</button>
+        </div>
+        <div class="p-4 overflow-auto">
+          <table class="w-full text-xs">
+            <thead><tr><th class="th">الكود</th><th class="th">اسم الفرع</th><th class="th">الهاتف</th><th class="th">العنوان</th><th class="th">الحالة</th><th class="th text-center">إجراءات</th></tr></thead>
+            <tbody>${rows.map((b) => `
+              <tr class="tr">
+                <td class="td font-mono font-bold text-zain-700">${esc(b.code)}</td>
+                <td class="td font-bold text-sm">${esc(b.name)}</td>
+                <td class="td font-mono" dir="ltr">${esc(b.phone || '—')}</td>
+                <td class="td text-slate-500">${esc(b.address || '—')}</td>
+                <td class="td">${b.is_active ? '<span class="badge badge-ok">نشط</span>' : '<span class="badge badge-mute">معطل</span>'}</td>
+                <td class="td text-center">
+                  <div class="flex items-center justify-center gap-1">
+                    <button data-b-edit="${b.id}" class="btn btn-ghost btn-sm" title="تعديل"><i class="bi bi-pencil"></i></button>
+                    <button data-b-toggle="${b.id}" class="btn btn-ghost btn-sm" title="${b.is_active ? 'تعطيل' : 'تفعيل'}"><i class="bi ${b.is_active ? 'bi-toggle-on text-emerald-600' : 'bi-toggle-off text-slate-400'}"></i></button>
+                    <button data-b-del="${b.id}" class="btn btn-ghost btn-sm text-rose-500" title="حذف الفرع الفارغ"><i class="bi bi-trash3"></i></button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  async function branchForm(row) {
+    const isNew = !row;
+    const b = row || { code: '', name: '', phone: '', address: '', is_active: 1 };
+    modal({
+      title: isNew ? 'إضافة فرع جديد' : `تعديل بيانات: ${b.name}`,
+      size: 'max-w-md',
+      body: `
+        <div class="space-y-3 text-xs">
+          ${field('كود الفرع المميز (مثل B1, B2) *', `<input id="brCode" class="field w-full font-mono font-bold" value="${esc(b.code)}" required placeholder="B3" />`)}
+          ${field('اسم الفرع التجاري *', `<input id="brName" class="field w-full font-bold" value="${esc(b.name)}" required placeholder="مثال: فرع وسط البلد" />`)}
+          ${field('هاتف الفرع', `<input id="brPhone" type="tel" dir="ltr" class="field w-full" value="${esc(b.phone || '')}" placeholder="010xxxxxxxx" />`)}
+          ${field('عنوان وموقع الفرع', `<input id="brAddress" class="field w-full" value="${esc(b.address || '')}" placeholder="الشارع، المنطقة، المدينة" />`)}
+          <label class="flex items-center gap-2 text-xs font-bold text-slate-700">
+            <input id="brActive" type="checkbox" ${b.is_active ? 'checked' : ''} class="accent-zain-600" />
+            <span>الفرع نشط ومتاح لتسجيل العمليات</span>
+          </label>
+        </div>`,
+      footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="brSave" class="btn btn-primary">حفظ وتأكيد</button>`,
+      onMount(wrap, close) {
+        wrap.querySelector('[data-cancel]').addEventListener('click', close);
+        wrap.querySelector('#brSave').addEventListener('click', async () => {
+          const code = wrap.querySelector('#brCode').value.trim();
+          const name = wrap.querySelector('#brName').value.trim();
+          if (!code || !name) { toast('كود واسم الفرع مطلوبان', 'error'); return; }
+          const payload = {
+            code,
+            name,
+            phone: wrap.querySelector('#brPhone').value.trim() || '',
+            address: wrap.querySelector('#brAddress').value.trim() || '',
+            is_active: wrap.querySelector('#brActive').checked ? 1 : 0,
+          };
+          try {
+            if (isNew) await api('POST', '/api/branches', payload);
+            else await api('PUT', `/api/branches/${b.id}`, payload);
+            toast('تم حفظ بيانات الفرع بنجاح', 'success');
+            close();
+            renderAdmin(c);
+          } catch (e) { toast(e.message, 'error'); }
+        });
+      },
+    });
+  }
 
   function currencyCard(data) {
     const rows = data.rows || [];
@@ -356,9 +459,7 @@ export async function renderAdmin(c) {
         ${field('اسم الدخول', `<input id="uName" class="field" value="${esc(u ? u.username : '')}" ${u ? 'readonly' : ''} />`)}
         ${field('الاسم الكامل', `<input id="uFull" class="field" value="${esc(u ? u.full_name : '')}" />`)}
         ${field('فرع العمل', `<select id="uBranch" class="field">
-          <option value="فرع سموحة" ${(u ? u.branch : '') === 'فرع سموحة' ? 'selected' : ''}>فرع سموحة</option>
-          <option value="فرع ميت غمر" ${(u ? u.branch : '') === 'فرع ميت غمر' ? 'selected' : ''}>فرع ميت غمر</option>
-          <option value="الفرع الرئيسي" ${(u ? u.branch : '') === 'الفرع الرئيسي' ? 'selected' : ''}>الفرع الرئيسي</option>
+          ${(branchesData.rows && branchesData.rows.length ? branchesData.rows : [{ name: 'الفرع الرئيسي', code: 'B1' }, { name: 'الفرع الثاني', code: 'B2' }]).map((b) => `<option value="${esc(b.name)}" ${(u ? u.branch : '') === b.name ? 'selected' : ''}>${esc(b.name)} (${esc(b.code)})</option>`).join('')}
         </select>`)}
         ${field('الهاتف', `<input id="uPhone" class="field" value="${esc(u ? u.phone || '' : '')}" />`)}
         ${field('الصفة', `<select id="uRole" class="field">

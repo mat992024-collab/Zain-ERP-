@@ -10,6 +10,16 @@ export const state = {
 };
 
 export async function api(method, path, body) {
+  if (path === undefined && typeof method === 'string' && (method.startsWith('/') || method.startsWith('http'))) {
+    path = method;
+    method = 'GET';
+  } else if (typeof path === 'object' && path !== null && body === undefined && typeof method === 'string' && (method.startsWith('/') || method.startsWith('http'))) {
+    const url = method;
+    const opts = path;
+    method = opts.method || 'GET';
+    body = opts.body;
+    path = url;
+  }
   const res = await fetch(path, {
     method,
     headers: {

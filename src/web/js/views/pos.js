@@ -782,48 +782,79 @@ function openPayment() {
 function openPaymentModal(t) {
   const base = currencies.find((c) => c.is_base) || { code: 'IQD', symbol: state.settings.currency_symbol || 'د.ع', rate: 1, decimals: 0 };
   const hasForeign = currencies.some((c) => !c.is_base);
+  let receiptFormat = 'thermal';
+
   modal({
-    title: 'إتمام عملية البيع',
-    size: 'max-w-md',
+    title: 'إتمام عملية البيع والمعاينة المباشرة للفاتورة',
+    size: 'max-w-4xl',
     body: `
-      <div class="bg-zain-50 rounded-xl p-4 text-center mb-4">
-        <div class="text-xs text-zain-600 font-bold">المبلغ المطلوب</div>
-        <div class="text-3xl font-black text-zain-700" id="payTotal">${money(t.total)}</div>
-        <div class="text-[11px] text-slate-500 mt-1" id="payBaseLine"></div>
-      </div>
-      ${hasForeign ? field('عملة الدفع', `<select id="payCurrency" class="field">${currencies.map((c) => `<option value="${esc(c.code)}" ${c.is_base ? 'selected' : ''}>${esc(c.code)} — ${esc(c.name)} (${esc(c.symbol || c.code)})</option>`).join('')}</select>`) : ''}
-      <div class="mb-3">
-        <label class="label">طريقة الدفع</label>
-        <div class="grid grid-cols-3 gap-2" id="pmRow">
-          <button data-pm="cash" class="pm-btn btn btn-primary">نقدي</button>
-          <button data-pm="vodafone_cash" class="pm-btn btn btn-ghost text-red-600 font-bold"><i class="bi bi-phone"></i> فودافون كاش</button>
-          <button data-pm="card" class="pm-btn btn btn-ghost">بطاقة</button>
-          <button data-pm="wallet" class="pm-btn btn btn-ghost">محفظة</button>
-          <button data-pm="credit" class="pm-btn btn btn-ghost">آجل</button>
-          <button data-pm="mixed" class="pm-btn btn btn-ghost">مختلط</button>
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        <div class="lg:col-span-7 space-y-3">
+          <div class="bg-zain-50 rounded-xl p-3 text-center">
+            <div class="text-xs text-zain-600 font-bold">المبلغ المطلوب</div>
+            <div class="text-3xl font-black text-zain-700" id="payTotal">${money(t.total)}</div>
+            <div class="text-[11px] text-slate-500 mt-0.5" id="payBaseLine"></div>
+          </div>
+          ${hasForeign ? field('عملة الدفع', `<select id="payCurrency" class="field">${currencies.map((c) => `<option value="${esc(c.code)}" ${c.is_base ? 'selected' : ''}>${esc(c.code)} — ${esc(c.name)} (${esc(c.symbol || c.code)})</option>`).join('')}</select>`) : ''}
+          <div>
+            <label class="label">طريقة الدفع</label>
+            <div class="grid grid-cols-3 gap-1.5" id="pmRow">
+              <button data-pm="cash" class="pm-btn btn btn-primary text-xs py-1.5">نقدي</button>
+              <button data-pm="vodafone_cash" class="pm-btn btn btn-ghost text-red-600 font-bold text-xs py-1.5"><i class="bi bi-phone"></i> فودافون كاش</button>
+              <button data-pm="card" class="pm-btn btn btn-ghost text-xs py-1.5">بطاقة</button>
+              <button data-pm="wallet" class="pm-btn btn btn-ghost text-xs py-1.5">محفظة</button>
+              <button data-pm="credit" class="pm-btn btn btn-ghost text-xs py-1.5">آجل</button>
+              <button data-pm="mixed" class="pm-btn btn btn-ghost text-xs py-1.5">مختلط</button>
+            </div>
+          </div>
+          <div id="singlePay">
+            ${field('المبلغ المدفوع', `<input id="payAmount" type="number" value="${t.total}" class="field !text-lg font-bold" />`)}
+          </div>
+          <div id="mixedPay" class="hidden">
+            <div class="grid grid-cols-2 gap-2">
+              ${field('نقدي', `<input id="payCash" type="number" step="0.01" value="${t.total}" class="field font-bold" />`)}
+              ${field('فودافون كاش', `<input id="payVodafone" type="number" step="0.01" value="0" class="field font-bold text-red-600" />`)}
+              ${field('بطاقة', `<input id="payCard" type="number" step="0.01" value="0" class="field font-bold" />`)}
+              ${field('محفظة', `<input id="payWallet" type="number" step="0.01" value="0" class="field font-bold" />`)}
+            </div>
+            <div class="flex items-center justify-between gap-2 mt-1">
+              <button type="button" id="payFill" class="btn btn-ghost btn-sm text-xs"><i class="bi bi-magic"></i> توزيع الباقي نقداً</button>
+              <div id="mixRemain" class="text-xs font-bold text-slate-500"></div>
+            </div>
+            <div class="text-[10px] text-slate-400 mt-1">الدفع المقسّم متاح بالعملة الأساسية فقط.</div>
+          </div>
+          <div id="changeBox" class="text-center text-xs"></div>
+          <div id="discountLine" class="text-center text-[10px] text-slate-500"></div>
         </div>
-      </div>
-      <div id="singlePay">
-        ${field('المبلغ المدفوع', `<input id="payAmount" type="number" value="${t.total}" class="field !text-lg font-bold" />`)}
-      </div>
-      <div id="mixedPay" class="hidden">
-        <div class="grid grid-cols-2 gap-2">
-          ${field('نقدي', `<input id="payCash" type="number" step="0.01" value="${t.total}" class="field font-bold" />`)}
-          ${field('فودافون كاش', `<input id="payVodafone" type="number" step="0.01" value="0" class="field font-bold text-red-600" />`)}
-          ${field('بطاقة', `<input id="payCard" type="number" step="0.01" value="0" class="field font-bold" />`)}
-          ${field('محفظة', `<input id="payWallet" type="number" step="0.01" value="0" class="field font-bold" />`)}
+
+        <div class="lg:col-span-5 bg-[var(--color-bg)] p-3 rounded-xl border border-[var(--color-border)] flex flex-col justify-between space-y-2">
+          <div>
+            <div class="flex items-center justify-between pb-2 mb-2 border-b border-[var(--color-border)]">
+              <span class="text-xs font-bold text-[var(--color-text)]"><i class="bi bi-eye me-1 text-[var(--color-primary)]"></i>معاينة الفاتورة الفعلية</span>
+              <div class="inline-flex rounded-lg border border-[var(--color-border)] p-0.5 bg-[var(--color-surface)] text-[10px]">
+                <button id="prevModeThermal" type="button" class="px-2 py-0.5 rounded font-bold bg-[var(--color-primary)] text-white">حراري (80mm)</button>
+                <button id="prevModeA4" type="button" class="px-2 py-0.5 rounded font-bold text-[var(--color-text-mute)]">رسمي A4</button>
+              </div>
+            </div>
+            <div id="receiptPaper" class="bg-white text-slate-800 p-3 rounded-lg shadow-sm text-xs font-sans max-h-[46vh] overflow-y-auto space-y-2 border border-slate-200" dir="rtl"></div>
+          </div>
+          <div class="pt-2 border-t border-[var(--color-border)] flex items-center justify-between text-[11px]">
+            <span class="text-[var(--color-text-mute)]"><i class="bi bi-printer me-1"></i>جاهزة للطباعة</span>
+            <span class="badge badge-info text-[10px]">${esc(state.user && state.user.branch || 'الفرع الرئيسي')}</span>
+          </div>
         </div>
-        <div class="flex items-center justify-between gap-2 mt-1">
-          <button type="button" id="payFill" class="btn btn-ghost btn-sm"><i class="bi bi-magic"></i> توزيع الباقي نقداً</button>
-          <div id="mixRemain" class="text-sm font-bold text-slate-500"></div>
+      </div>`,
+    footer: `
+      <div class="flex flex-wrap items-center justify-between gap-2 w-full">
+        <button data-cancel class="btn btn-ghost">إلغاء</button>
+        <div class="flex items-center gap-2">
+          <button id="confirmPayA4" class="btn btn-primary flex items-center gap-1.5"><i class="bi bi-file-earmark-text"></i> تأكيد وطباعة A4</button>
+          <button id="confirmPay" class="btn btn-success flex items-center gap-1.5"><i class="bi bi-check2-circle"></i> تأكيد وطباعة حراري (80mm)</button>
         </div>
-        <div class="text-[10px] text-slate-400 mt-1">الدفع المقسّم متاح بالعملة الأساسية فقط.</div>
-      </div>
-      <div id="changeBox" class="mt-3 text-center text-sm"></div>
-      <div id="discountLine" class="mt-1 text-center text-[11px] text-slate-500"></div>`,
-    footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="confirmPay" class="btn btn-success"><i class="bi bi-check2-circle"></i> تأكيد وطباعة</button>`,
+      </div>`,
     onMount(wrap, close) {
       let method = 'cash';
+      let chosenPrintMode = 'thermal';
       const singleBox = wrap.querySelector('#singlePay');
       const mixedBox = wrap.querySelector('#mixedPay');
       const amount = wrap.querySelector('#payAmount');
@@ -837,6 +868,23 @@ function openPaymentModal(t) {
       const curSel = wrap.querySelector('#payCurrency');
       const totalBox = wrap.querySelector('#payTotal');
       const baseLine = wrap.querySelector('#payBaseLine');
+      const paperEl = wrap.querySelector('#receiptPaper');
+      const btnThermal = wrap.querySelector('#prevModeThermal');
+      const btnA4 = wrap.querySelector('#prevModeA4');
+
+      btnThermal.addEventListener('click', () => {
+        receiptFormat = 'thermal';
+        btnThermal.className = 'px-2 py-0.5 rounded font-bold bg-[var(--color-primary)] text-white';
+        btnA4.className = 'px-2 py-0.5 rounded font-bold text-[var(--color-text-mute)]';
+        update();
+      });
+      btnA4.addEventListener('click', () => {
+        receiptFormat = 'a4';
+        btnA4.className = 'px-2 py-0.5 rounded font-bold bg-[var(--color-primary)] text-white';
+        btnThermal.className = 'px-2 py-0.5 rounded font-bold text-[var(--color-text-mute)]';
+        update();
+      });
+
       const curOf = () => currencies.find((c) => c.code === (curSel ? curSel.value : base.code)) || base;
       const isForeign = () => !curOf().is_base;
       const itemPriceIn = (item, c) => {
@@ -867,6 +915,99 @@ function openPaymentModal(t) {
         return isForeign() ? (c.symbol || c.code) : (state.settings.currency_symbol || 'د.ع');
       };
       const mixedPaid = () => roundTo((Number(cashIn.value) || 0) + (Number(vodafoneIn ? vodafoneIn.value : 0) || 0) + (Number(cardIn.value) || 0) + (Number(walletIn.value) || 0), curOf().decimals);
+
+      const renderPaper = (totalF, paidF) => {
+        const company = state.settings.company_name || 'شركة زين التجارية';
+        const phone = state.settings.company_phone || '';
+        const branch = (state.user && state.user.branch) || 'الفرع الرئيسي';
+        const now = new Date().toLocaleString('ar-IQ');
+        const custName = (customers.find((c) => String(c.id) === String(state.cartMeta.customer_id)) || {}).name || 'عميل نقدي';
+        const rem = Math.max(totalF - paidF, 0);
+
+        if (receiptFormat === 'thermal') {
+          paperEl.innerHTML = `
+            <div class="text-center pb-2 border-b border-dashed border-slate-300">
+              <img src="/assets/logo.png" alt="logo" class="h-10 mx-auto mb-1 object-contain" />
+              <div class="font-black text-sm text-slate-900">${esc(company)}</div>
+              <div class="text-[10px] text-slate-500">${esc(branch)} · ${esc(phone)}</div>
+              <div class="text-[10px] text-slate-400 mt-0.5">${esc(now)}</div>
+            </div>
+            <div class="text-[10px] text-slate-600 flex justify-between py-1 border-b border-slate-200">
+              <span>العميل: <b>${esc(custName)}</b></span>
+              <span>الكاشير: <b>${esc((state.user && state.user.full_name) || 'الكاشير')}</b></span>
+            </div>
+            <table class="w-full text-[11px] my-1">
+              <thead><tr class="border-b border-slate-200 text-slate-500"><th class="text-right py-1">الصنف</th><th class="text-center">الكمية</th><th class="text-left">الإجمالي</th></tr></thead>
+              <tbody class="divide-y divide-slate-100">
+                ${state.cart.map((i) => `
+                  <tr>
+                    <td class="py-1">
+                      <div class="font-bold text-slate-800">${esc(i.name)}</div>
+                      ${i.dimensions ? `<div class="text-[9px] text-indigo-600">${esc(i.dimensions)}</div>` : ''}
+                    </td>
+                    <td class="text-center font-mono">${num(i.qty)}</td>
+                    <td class="text-left font-bold font-mono">${money(i.qty * i.unit_price - i.discount)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            <div class="border-t border-dashed border-slate-300 pt-1 text-[11px] space-y-0.5 font-bold">
+              <div class="flex justify-between text-slate-600"><span>المجموع:</span><span>${money(t.sub)}</span></div>
+              ${t.itemsDisc || Number(state.cartMeta.discount || 0) ? `<div class="flex justify-between text-rose-600"><span>الخصم:</span><span>-${money(t.itemsDisc + Number(state.cartMeta.discount || 0))}</span></div>` : ''}
+              <div class="flex justify-between text-sm font-black text-slate-900 pt-1 border-t border-slate-200"><span>الإجمالي النهائي:</span><span>${money(totalF, symbolOf())}</span></div>
+              <div class="flex justify-between text-emerald-700"><span>المدفوع (${method}):</span><span>${money(paidF, symbolOf())}</span></div>
+              ${rem > 0 ? `<div class="flex justify-between text-rose-600"><span>المتبقي (آجل):</span><span>${money(rem, symbolOf())}</span></div>` : ''}
+            </div>
+            <div class="text-center pt-2 border-t border-dashed border-slate-300">
+              <div class="font-mono text-[9px] text-slate-400">||| | |||| | ||| |||| | ||</div>
+              <div class="text-[10px] text-slate-500 mt-0.5">${esc(state.settings.receipt_footer || 'شكراً لزيارتكم')}</div>
+            </div>
+          `;
+        } else {
+          paperEl.innerHTML = `
+            <div class="border border-slate-300 p-2 rounded bg-slate-50/50 space-y-2">
+              <div class="flex items-center justify-between pb-2 border-b border-slate-300">
+                <div class="flex items-center gap-2">
+                  <img src="/assets/logo.png" alt="logo" class="h-8 object-contain" />
+                  <div>
+                    <strong class="text-xs text-slate-900">${esc(company)}</strong>
+                    <div class="text-[9px] text-slate-500">${esc(branch)} · ${esc(phone)}</div>
+                  </div>
+                </div>
+                <div class="text-left text-[9px] text-slate-500 font-mono">
+                  <div>فاتورة مبيعات رسمية</div>
+                  <div>${esc(now)}</div>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-[10px] bg-white p-1.5 rounded border border-slate-200">
+                <div>العميل: <b>${esc(custName)}</b></div>
+                <div class="text-left">طريقة السداد: <b>${esc(method)}</b></div>
+              </div>
+              <table class="w-full text-[10px] bg-white rounded border border-slate-200">
+                <thead class="bg-slate-100 text-slate-600 border-b border-slate-200">
+                  <tr><th class="p-1 text-right">#</th><th class="p-1 text-right">البيان</th><th class="p-1 text-center">الكمية</th><th class="p-1 text-left">السعر</th><th class="p-1 text-left">الإجمالي</th></tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  ${state.cart.map((i, idx) => `
+                    <tr>
+                      <td class="p-1 text-slate-400 font-mono">${idx + 1}</td>
+                      <td class="p-1 font-bold">${esc(i.name)} ${i.dimensions ? `<span class="text-indigo-600 font-normal">(${esc(i.dimensions)})</span>` : ''}</td>
+                      <td class="p-1 text-center font-mono">${num(i.qty)}</td>
+                      <td class="p-1 text-left font-mono">${money(i.unit_price)}</td>
+                      <td class="p-1 text-left font-bold font-mono">${money(i.qty * i.unit_price - i.discount)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+              <div class="bg-white p-2 rounded border border-slate-200 flex justify-between items-center text-xs font-black">
+                <span>المبلغ المطلوب سداده:</span>
+                <span class="text-indigo-700">${money(totalF, symbolOf())}</span>
+              </div>
+            </div>
+          `;
+        }
+      };
+
       const update = () => {
         const cur = curOf();
         const totalF = totalIn();
@@ -878,28 +1019,33 @@ function openPaymentModal(t) {
         if (t.itemsDisc) disc.push(`خصم أصناف ${money(t.itemsDisc)}`);
         if (Number(state.cartMeta.discount || 0)) disc.push(`خصم فاتورة ${money(Number(state.cartMeta.discount) || 0)}`);
         discountLine.textContent = disc.length ? `بند الخصم: ${disc.join(' + ')}` : '';
+        let paidVal = 0;
         if (method === 'mixed') {
           const paid = mixedPaid();
+          paidVal = paid;
           const diff = roundTo(totalF - paid, 2);
-          mixRemain.className = `text-sm font-bold ${diff > 0.009 ? 'text-amber-600' : 'text-emerald-600'}`;
+          mixRemain.className = `text-xs font-bold ${diff > 0.009 ? 'text-amber-600' : 'text-emerald-600'}`;
           mixRemain.textContent = diff > 0.009 ? `الباقي: ${money(diff, symbolOf())}` : diff < -0.009 ? `المتبقي للعميل: ${money(-diff, symbolOf())}` : 'مكتمل';
           changeBox.innerHTML = '';
         } else {
           const paid = Number(amount.value) || 0;
+          paidVal = paid;
           changeBox.innerHTML = paid >= totalF
             ? `<span class="text-emerald-600 font-bold">المتبقي للعميل: ${money(paid - totalF, symbolOf())}</span>`
             : `<span class="text-amber-600 font-bold">الباقي على العميل: ${money(totalF - paid, symbolOf())}</span>`;
         }
+        renderPaper(totalF, paidVal);
       };
+
       const setMethod = (next) => {
         if (next === 'mixed' && isForeign()) {
           toast('الدفع المقسّم متاح بالعملة الأساسية فقط', 'error');
           return;
         }
         method = next;
-        wrap.querySelectorAll('.pm-btn').forEach((x) => { x.className = 'pm-btn btn btn-ghost'; });
+        wrap.querySelectorAll('.pm-btn').forEach((x) => { x.className = 'pm-btn btn btn-ghost text-xs py-1.5'; });
         const btn = wrap.querySelector(`.pm-btn[data-pm="${method}"]`);
-        if (btn) btn.className = 'pm-btn btn btn-primary';
+        if (btn) btn.className = 'pm-btn btn btn-primary text-xs py-1.5';
         singleBox.classList.toggle('hidden', method === 'mixed');
         mixedBox.classList.toggle('hidden', method !== 'mixed');
         if (method === 'mixed') {
@@ -933,7 +1079,9 @@ function openPaymentModal(t) {
       update();
       wrap.querySelectorAll('.pm-btn').forEach((b) => b.addEventListener('click', () => setMethod(b.dataset.pm)));
       wrap.querySelector('[data-cancel]').addEventListener('click', close);
-      wrap.querySelector('#confirmPay').addEventListener('click', async () => {
+
+      const doSubmit = async (printMode) => {
+        chosenPrintMode = printMode;
         const cur = curOf();
         const rate = Number(cur.rate) || 1;
         let paidForeign = 0;
@@ -965,21 +1113,25 @@ function openPaymentModal(t) {
         try {
           const res = await send(false);
           close();
-          await afterSale(res);
+          await afterSale(res, chosenPrintMode);
         } catch (err) {
           if (err.code === 'CREDIT_LIMIT') {
             creditLimitWarning(err.details || {}, async () => {
               try {
                 const res = await send(true);
                 close();
-                await afterSale(res);
+                await afterSale(res, chosenPrintMode);
               } catch (e2) { toast(e2.message, 'error'); }
             });
             return;
           }
           toast(err.message, 'error');
         }
-      });
+      };
+
+      wrap.querySelector('#confirmPay').addEventListener('click', () => doSubmit('thermal'));
+      const a4Btn = wrap.querySelector('#confirmPayA4');
+      if (a4Btn) a4Btn.addEventListener('click', () => doSubmit('a4'));
     },
   });
 }
@@ -1034,11 +1186,16 @@ function creditLimitWarning(details, onConfirm) {
   });
 }
 
-async function afterSale(res) {
+async function afterSale(res, chosenPrintMode) {
   state.cart = [];
   try { localStorage.removeItem('zain_auto_suspended_cart'); } catch {}
   openCashDrawer();
   const invId = res.invoice.id;
+  if (chosenPrintMode === 'a4') {
+    openPrint(`/api/print/a4/${invId}`);
+  } else {
+    openPrint(`/api/print/thermal/${invId}`);
+  }
   await Promise.all([
     refreshProducts(),
     api('GET', '/api/shifts/current').then((r) => { state.shift = r.shift; renderShiftBadge(); }).catch(() => {}),
