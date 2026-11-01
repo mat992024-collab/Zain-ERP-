@@ -493,6 +493,8 @@ CREATE INDEX IF NOT EXISTS idx_work_orders_customer ON work_orders(customer_id);
 const DEFAULT_SETTINGS = [
   ["company_name", "شركة زين التجارية", "general"],
   ["company_phone", "07700000000", "general"],
+  ["company_wallet", "01000783581", "general"],
+  ["company_instapay", "01000783581", "general"],
   ["company_address", "بغداد - العراق", "general"],
   ["company_tax_id", "", "general"],
   ["currency", "IQD", "general"],
@@ -512,7 +514,7 @@ const DEFAULT_SETTINGS = [
   ["print_footer_note", "", "printing"],
   ["print_invoice_note", "", "printing"],
   ["print_label_note", "", "printing"],
-  ["print_show_logo", "0", "printing"],
+  ["print_show_logo", "1", "printing"],
   ["print_logo_data", "", "printing"],
   ["print_show_tax_id", "1", "printing"],
   ["print_show_cashier", "1", "printing"],

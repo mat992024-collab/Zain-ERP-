@@ -18,8 +18,48 @@ function density(settings) {
 }
 
 function logoTag(settings, cls = 'print-logo') {
-  if (settings.print_show_logo !== '1' || !settings.print_logo_data) return '';
-  return `<img class="${cls}" src="${esc(settings.print_logo_data)}" alt="شعار المؤسسة" />`;
+  const logo = settings.print_logo_data || settings.company_logo || '';
+  if (!logo || settings.print_show_logo === '0') return '';
+  return `<img class="${cls}" src="${esc(logo)}" alt="شعار المؤسسة" />`;
+}
+
+function paymentChannels(settings, a4 = false) {
+  const wallet = settings.company_wallet || '';
+  const instapay = settings.company_instapay || '';
+  if (!wallet && !instapay) return '';
+  if (a4) {
+    return `
+      <div class="payment-channels" style="margin:14px 0 10px;padding:8px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;display:flex;justify-content:center;gap:28px;align-items:center;">
+        ${wallet ? `<div>📱 <b style="color:#0f172a">رقم المحفظة:</b> <span style="font-family:monospace;font-weight:bold;color:#4338ca;font-size:13px;">${esc(wallet)}</span></div>` : ''}
+        ${instapay ? `<div>⚡ <b style="color:#0f172a">إنستا باي (InstaPay):</b> <span style="font-family:monospace;font-weight:bold;color:#4338ca;font-size:13px;">${esc(instapay)}</span></div>` : ''}
+      </div>
+    `;
+  }
+  return `
+    <div class="payment-channels" style="margin:6px 0;padding:5px 2px;background:#f8fafc;border:1px dashed #000;border-radius:4px;text-align:center;font-size:9.5px;line-height:1.5;">
+      ${wallet ? `<div>📱 <b>رقم المحفظة:</b> <span style="font-family:monospace;font-weight:bold;">${esc(wallet)}</span></div>` : ''}
+      ${instapay ? `<div>⚡ <b>إنستا باي:</b> <span style="font-family:monospace;font-weight:bold;">${esc(instapay)}</span></div>` : ''}
+    </div>
+  `;
+}
+
+function systemFooter(a4 = false) {
+  if (a4) {
+    return `
+      <div class="system-branding" style="margin-top:24px;padding-top:10px;border-top:1px dashed #cbd5e1;text-align:center;font-size:11px;color:#64748b;line-height:1.6;">
+        <div style="font-weight:bold;color:#1e293b;font-size:12px;">نظام زين ERP المحاسبي</div>
+        <div style="color:#334155;font-weight:600;">تصميم وتنفيذ م/ طارق حافظ</div>
+        <div style="font-family:monospace;direction:ltr;font-weight:bold;color:#4338ca;font-size:13px;letter-spacing:0.5px;">01000783581</div>
+      </div>
+    `;
+  }
+  return `
+    <div class="system-branding" style="margin-top:8px;padding-top:6px;border-top:1px dashed #000;text-align:center;font-size:9.5px;color:#000;line-height:1.5;">
+      <div style="font-weight:bold;">نظام زين ERP المحاسبي</div>
+      <div>تصميم وتنفيذ م/ طارق حافظ</div>
+      <div style="font-family:monospace;direction:ltr;font-weight:bold;font-size:10.5px;">01000783581</div>
+    </div>
+  `;
 }
 
 function headerExtra(settings) {
@@ -66,6 +106,8 @@ module.exports = {
   fontSize,
   density,
   logoTag,
+  paymentChannels,
+  systemFooter,
   headerExtra,
   footerExtra,
   labelFooter,

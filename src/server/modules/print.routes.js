@@ -158,9 +158,11 @@ module.exports = {
           ${Number(invoice.due) ? `<tr><td>متبقي</td><td class="col-price">${money(invCur.convert(invoice.due), cur)}</td></tr>` : ''}
         </table>
         ${invCur.foreign ? `<div class="center muted">المبلغ بالعملة الأساسية: ${money(invoice.total, settings.currency_symbol || 'د.ع')} — سعر الصرف: 1 ${esc(invCur.foreign.code)} = ${invCur.rate} ${esc(settings.base_currency || 'IQD')}</div>` : ''}
+        ${tpl.paymentChannels(settings, false)}
         <div class="line"></div>
         <div class="center muted">${esc(settings.receipt_footer || '')}</div>
-        ${tpl.footerExtra(settings)}`;
+        ${tpl.footerExtra(settings)}
+        ${tpl.systemFooter(false)}`;
       sendText(ctx.res, 200, htmlDoc(invoice.invoice_no, THERMAL_CSS(mm) + tpl.extraCss(settings, false), body), 'text/html; charset=utf-8');
     });
 
@@ -220,10 +222,12 @@ module.exports = {
           <div><span>المتبقي</span><span>${money(invCur.convert(invoice.due), cur)}</span></div>
           ${invCur.foreign ? `<div><span>المبلغ بالعملة الأساسية</span><span>${money(invoice.total, settings.currency_symbol || 'د.ع')}</span></div>` : ''}
         </div>
+        ${tpl.paymentChannels(settings, true)}
         <footer>
           <div>${esc(settings.receipt_footer || '')}${tpl.footerExtra(settings)}</div>
           <div style="text-align:left">التوقيع: ....................</div>
-        </footer>`;
+        </footer>
+        ${tpl.systemFooter(true)}`;
       sendText(ctx.res, 200, htmlDoc(invoice.invoice_no, css + tpl.extraCss(settings, true), body), 'text/html; charset=utf-8');
     });
 
