@@ -172,6 +172,14 @@ module.exports = {
       db.logActivity(ctx.user.id, 'shift_close', 'shifts', shift.id, { closingBalance, expected: summary.expected_cash });
       const closedShift = shiftSummary(db.get('SELECT * FROM shifts WHERE id = ?', [shift.id]));
       const wa = buildShiftWhatsApp(closedShift);
+
+      if (db.getSetting('backup_on_shift_close', '1') !== '0') {
+        try {
+          const backupModule = require('./backup.routes');
+          backupModule.createAutoSnapshot();
+        } catch {}
+      }
+
       sendJson(ctx.res, 200, { shift: closedShift, whatsapp: wa });
     });
   },

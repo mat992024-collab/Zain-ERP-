@@ -23,8 +23,9 @@ function stamp() {
 
 function autoState() {
   const enabled = db.getSetting('auto_backup', '0') === '1';
+  const on_shift_close = db.getSetting('backup_on_shift_close', '1') !== '0';
   const time = db.getSetting('auto_backup_time', '02:00');
-  const keep = Math.max(1, Math.min(Number(db.getSetting('auto_backup_keep', '7')) || 7, 90));
+  const keep = Math.max(1, Math.min(Number(db.getSetting('auto_backup_keep', '7')) || 7, 2000));
   const last = db.getSetting('auto_backup_last', '');
   const now = new Date();
   const [hh, mm] = String(time).split(':').map((n) => Number(n) || 0);
@@ -33,6 +34,7 @@ function autoState() {
   if (nextRun.getTime() <= now.getTime()) nextRun.setDate(nextRun.getDate() + 1);
   return {
     enabled,
+    on_shift_close,
     time,
     keep,
     last,
@@ -65,7 +67,7 @@ function imageEntries() {
 function externalState() {
   const enabled = db.getSetting('backup_external_enabled', '0') === '1';
   const dir = String(db.getSetting('backup_external_dir', '') || '').trim();
-  const keep = Math.max(1, Math.min(Number(db.getSetting('backup_external_keep', '5')) || 5, 90));
+  const keep = Math.max(1, Math.min(Number(db.getSetting('backup_external_keep', '5')) || 5, 2000));
   let exists = false;
   let writable = false;
   let count = 0;
@@ -282,7 +284,7 @@ module.exports = {
       }
       if (body.keep !== undefined) {
         const keep = Number(body.keep);
-        if (!Number.isInteger(keep) || keep < 1 || keep > 90) throw new HttpError(400, 'عدد النسخ المحفوظة يجب أن يكون بين 1 و 90');
+        if (!Number.isInteger(keep) || keep < 1 || keep > 2000) throw new HttpError(400, 'عدد النسخ المحفوظة يجب أن يكون بين 1 و 2000');
         db.setSetting('backup_external_keep', keep, 'backup');
       }
       db.logActivity(ctx.user.id, 'update', 'backup_external', null, { enabled: body.enabled, dir: body.dir, keep: body.keep });
@@ -307,6 +309,7 @@ module.exports = {
       requirePerm(ctx, 'backup.manage');
       const body = ctx.body || {};
       if (body.enabled !== undefined) db.setSetting('auto_backup', body.enabled ? '1' : '0', 'backup');
+      if (body.on_shift_close !== undefined) db.setSetting('backup_on_shift_close', body.on_shift_close ? '1' : '0', 'backup');
       if (body.time !== undefined) {
         const time = String(body.time || '').trim();
         if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new HttpError(400, 'وقت النسخ التلقائي يجب أن يكون HH:MM');
@@ -314,10 +317,10 @@ module.exports = {
       }
       if (body.keep !== undefined) {
         const keep = Number(body.keep);
-        if (!Number.isInteger(keep) || keep < 1 || keep > 90) throw new HttpError(400, 'عدد النسخ المحفوظة يجب أن يكون بين 1 و 90');
+        if (!Number.isInteger(keep) || keep < 1 || keep > 2000) throw new HttpError(400, 'عدد النسخ المحفوظة يجب أن يكون بين 1 و 2000');
         db.setSetting('auto_backup_keep', keep, 'backup');
       }
-      db.logActivity(ctx.user.id, 'update', 'backup_auto', null, { enabled: body.enabled, time: body.time, keep: body.keep });
+      db.logActivity(ctx.user.id, 'update', 'backup_auto', null, { enabled: body.enabled, on_shift_close: body.on_shift_close, time: body.time, keep: body.keep });
       sendJson(ctx.res, 200, { ok: true, auto: autoState(), backups: listBackups() });
     });
 

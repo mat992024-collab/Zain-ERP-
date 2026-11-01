@@ -132,6 +132,7 @@ export async function renderAdmin(c) {
     try {
       await api('PUT', '/api/backup/auto', {
         enabled: c.querySelector('#bkAutoEnabled').checked ? 1 : 0,
+        on_shift_close: c.querySelector('#bkAutoShiftClose').checked ? 1 : 0,
         time: c.querySelector('#bkAutoTime').value,
         keep: Number(c.querySelector('#bkAutoKeep').value),
       });
@@ -139,6 +140,35 @@ export async function renderAdmin(c) {
       await renderAdmin(c);
     } catch (e) { toast(e.message, 'error'); bkAutoSave.disabled = false; }
   });
+
+  const autoRet = c.querySelector('#bkAutoRetention');
+  const autoKeepInp = c.querySelector('#bkAutoKeep');
+  if (autoRet && autoKeepInp) {
+    autoRet.addEventListener('change', () => {
+      if (autoRet.value === 'custom') {
+        autoKeepInp.classList.remove('hidden');
+        autoKeepInp.focus();
+      } else {
+        autoKeepInp.classList.add('hidden');
+        autoKeepInp.value = autoRet.value;
+      }
+    });
+  }
+
+  const extRet = c.querySelector('#bkExtRetention');
+  const extKeepInp = c.querySelector('#bkExtKeep');
+  if (extRet && extKeepInp) {
+    extRet.addEventListener('change', () => {
+      if (extRet.value === 'custom') {
+        extKeepInp.classList.remove('hidden');
+        extKeepInp.focus();
+      } else {
+        extKeepInp.classList.add('hidden');
+        extKeepInp.value = extRet.value;
+      }
+    });
+  }
+
   const bkAutoRun = c.querySelector('#bkAutoRun');
   if (bkAutoRun) bkAutoRun.addEventListener('click', async () => {
     bkAutoRun.disabled = true;
@@ -381,8 +411,13 @@ export async function renderAdmin(c) {
 
   function backupCard(res) {
     const rows = res.backups || [];
-    const auto = res.auto || { enabled: false, time: '02:00', keep: 7, last: '', next: '' };
+    const auto = res.auto || { enabled: false, on_shift_close: true, time: '02:00', keep: 7, last: '', next: '' };
     const ext = res.external || { enabled: false, dir: '', keep: 5, count: 0, last: '', error: '', exists: false, writable: false };
+    const autoKeep = auto.keep || 7;
+    const isAutoPreset = [7, 30, 90, 365, 1095, 1825].includes(autoKeep);
+    const extKeep = ext.keep || 5;
+    const isExtPreset = [7, 30, 90, 365, 1095, 1825].includes(extKeep);
+
     return `
       <div class="card mt-4" id="backupCard">
         <div class="p-4 flex justify-between items-center border-b border-slate-100">
@@ -394,26 +429,59 @@ export async function renderAdmin(c) {
             <button id="bkCreate" class="btn btn-primary"><i class="bi bi-download"></i> نسخة احتياطية الآن</button>
           </div>
         </div>
-        <div class="p-4 border-b border-slate-100 bg-slate-50">
+        <div class="p-4 border-b border-slate-100 bg-slate-50 space-y-3">
           <div class="flex flex-wrap items-center gap-3">
-            <div class="font-black text-sm"><i class="bi bi-clock-history text-zain-600"></i> النسخ التلقائي اليومي</div>
-            <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" id="bkAutoEnabled" ${auto.enabled ? 'checked' : ''} class="w-4 h-4 accent-zain-600" /> تفعيل</label>
+            <div class="font-black text-sm"><i class="bi bi-clock-history text-zain-600"></i> النسخ التلقائي والاحتفاظ</div>
+            <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" id="bkAutoEnabled" ${auto.enabled ? 'checked' : ''} class="w-4 h-4 accent-zain-600" /> تفعيل المجدول</label>
+            <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" id="bkAutoShiftClose" ${auto.on_shift_close !== false ? 'checked' : ''} class="w-4 h-4 accent-zain-600" /> نسخ عند إغلاق الوردية</label>
             <div class="flex items-center gap-2 text-sm"><span class="text-slate-500">الساعة</span><input type="time" id="bkAutoTime" class="field !w-28" value="${esc(auto.time || '02:00')}" /></div>
-            <div class="flex items-center gap-2 text-sm"><span class="text-slate-500">عدد النسخ المحفوظة</span><input type="number" id="bkAutoKeep" min="1" max="90" class="field !w-20" value="${esc(String(auto.keep || 7))}" /></div>
+            <div class="flex items-center gap-2 text-sm">
+              <span class="text-slate-500">مدة الحفظ</span>
+              <select id="bkAutoRetention" class="field !w-auto">
+                <option value="7" ${autoKeep === 7 ? 'selected' : ''}>أسبوع (7 نسخ)</option>
+                <option value="30" ${autoKeep === 30 ? 'selected' : ''}>شهر (30 نسخة)</option>
+                <option value="90" ${autoKeep === 90 ? 'selected' : ''}>3 أشهر (90 نسخة)</option>
+                <option value="365" ${autoKeep === 365 ? 'selected' : ''}>سنة كاملة (365 نسخة)</option>
+                <option value="1095" ${autoKeep === 1095 ? 'selected' : ''}>3 سنوات (1095 نسخة)</option>
+                <option value="1825" ${autoKeep === 1825 ? 'selected' : ''}>5 سنوات (1825 نسخة)</option>
+                <option value="custom" ${!isAutoPreset ? 'selected' : ''}>مخصص (يدوي)...</option>
+              </select>
+              <input type="number" id="bkAutoKeep" min="1" max="2000" class="field !w-20 ${isAutoPreset ? 'hidden' : ''}" value="${esc(String(autoKeep))}" title="عدد النسخ المحفوظة" />
+            </div>
             <button id="bkAutoSave" class="btn btn-ghost btn-sm"><i class="bi bi-check2"></i> حفظ</button>
             <button id="bkAutoRun" class="btn btn-ghost btn-sm"><i class="bi bi-play-fill"></i> تشغيل الآن</button>
-            <div class="text-xs text-slate-500 w-full">آخر نسخة تلقائية: <span class="font-bold">${esc(auto.last || 'لا يوجد')}</span> — النسخة القادمة: <span class="font-bold">${auto.next ? esc(new Date(auto.next).toLocaleString('ar-IQ')) : '-'}</span></div>
+          </div>
+          <div class="text-xs text-slate-500 w-full flex flex-wrap items-center gap-4">
+            <span>آخر نسخة تلقائية: <span class="font-bold text-slate-700">${esc(auto.last || 'لا يوجد')}</span></span>
+            <span>النسخة القادمة: <span class="font-bold text-slate-700">${auto.next ? esc(new Date(auto.next).toLocaleString('ar-IQ')) : '-'}</span></span>
+            <span>فترة الحفظ: <span class="font-bold text-zain-700">${autoKeep >= 365 ? (autoKeep / 365).toFixed(0) + ' سنوات (' + autoKeep + ' نسخة)' : autoKeep + ' نسخة'}</span></span>
           </div>
         </div>
-        <div class="p-4 border-b border-slate-100 bg-slate-50">
+        <div class="p-4 border-b border-slate-100 bg-slate-50 space-y-3">
           <div class="flex flex-wrap items-center gap-3">
-            <div class="font-black text-sm"><i class="bi bi-hdd-network text-zain-600"></i> النسخ إلى وسيط خارجي</div>
+            <div class="font-black text-sm"><i class="bi bi-hdd-network text-zain-600"></i> النسخ إلى وسيط خارجي (فلاشة USB / هارد ديسك)</div>
             <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" id="bkExtEnabled" ${ext.enabled ? 'checked' : ''} class="w-4 h-4 accent-zain-600" /> تفعيل</label>
-            <div class="flex items-center gap-2 text-sm flex-1 min-w-64"><span class="text-slate-500">المجلد</span><input id="bkExtDir" class="field !w-full" placeholder="E:\\ZainBackup" value="${esc(ext.dir || '')}" /></div>
-            <div class="flex items-center gap-2 text-sm"><span class="text-slate-500">عدد النسخ</span><input type="number" id="bkExtKeep" min="1" max="90" class="field !w-20" value="${esc(String(ext.keep || 5))}" /></div>
+            <div class="flex items-center gap-2 text-sm flex-1 min-w-64"><span class="text-slate-500">المسار / القرص</span><input id="bkExtDir" class="field !w-full font-mono" placeholder="E:\\ZainBackup" value="${esc(ext.dir || '')}" /></div>
+            <div class="flex items-center gap-2 text-sm">
+              <span class="text-slate-500">مدة الحفظ الخارجي</span>
+              <select id="bkExtRetention" class="field !w-auto">
+                <option value="7" ${extKeep === 7 ? 'selected' : ''}>أسبوع (7 نسخ)</option>
+                <option value="30" ${extKeep === 30 ? 'selected' : ''}>شهر (30 نسخة)</option>
+                <option value="90" ${extKeep === 90 ? 'selected' : ''}>3 أشهر (90 نسخة)</option>
+                <option value="365" ${extKeep === 365 ? 'selected' : ''}>سنة كاملة (365 نسخة)</option>
+                <option value="1095" ${extKeep === 1095 ? 'selected' : ''}>3 سنوات (1095 نسخة)</option>
+                <option value="1825" ${extKeep === 1825 ? 'selected' : ''}>5 سنوات (1825 نسخة)</option>
+                <option value="custom" ${!isExtPreset ? 'selected' : ''}>مخصص (يدوي)...</option>
+              </select>
+              <input type="number" id="bkExtKeep" min="1" max="2000" class="field !w-20 ${isExtPreset ? 'hidden' : ''}" value="${esc(String(extKeep))}" />
+            </div>
             <button id="bkExtSave" class="btn btn-ghost btn-sm"><i class="bi bi-check2"></i> حفظ</button>
             <button id="bkExtRun" class="btn btn-ghost btn-sm"><i class="bi bi-copy"></i> نسخ الآن</button>
-            <div class="text-xs text-slate-500 w-full">النسخ الموجودة هناك: <span class="font-bold">${ext.count}</span>${ext.last ? ` — آخر نسخ: <span class="font-bold">${esc(new Date(ext.last).toLocaleString('ar-IQ'))}</span>` : ''}${ext.error ? ` — <span class="text-rose-600 font-bold">${esc(ext.error)}</span>` : ''}</div>
+          </div>
+          <div class="text-xs text-slate-500 w-full flex flex-wrap items-center gap-4">
+            <span>النسخ المتوفرة هناك: <span class="font-bold text-slate-700">${ext.count}</span></span>
+            ${ext.last ? `<span>آخر نسخ: <span class="font-bold text-slate-700">${esc(new Date(ext.last).toLocaleString('ar-IQ'))}</span></span>` : ''}
+            ${ext.error ? `<span class="text-rose-600 font-bold">${esc(ext.error)}</span>` : ''}
           </div>
         </div>
         <div class="p-4">
