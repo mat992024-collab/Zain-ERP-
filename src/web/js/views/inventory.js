@@ -463,6 +463,8 @@ function labelsForm(productIds, singleProduct = null) {
 
   const presets = [
     { id: '50x30', w: 50, h: 30, label: '50×30 مم (طابعات ملصقات Xprinter / Zebra)' },
+    { id: '80x30_dual', w: 80, h: 30, label: '80×30 مم (رول مزدوج عمودين 2-Up)' },
+    { id: '70x15_jewelry', w: 70, h: 15, label: '70×15 مم (فراشة نظارات ومجوهرات)' },
     { id: '40x25', w: 40, h: 25, label: '40×25 مم (شريط رفوف قياسي)' },
     { id: '30x20', w: 30, h: 20, label: '30×20 مم (ملصق صغير / مجوهرات)' },
     { id: '60x40', w: 60, h: 40, label: '60×40 مم (مخازن وتجزئة)' },
@@ -482,6 +484,17 @@ function labelsForm(productIds, singleProduct = null) {
 
           <div class="grid grid-cols-2 gap-3">
             <div>
+              <label class="label">قالب وتصميم الملصق</label>
+              <select id="lblTemplate" class="field font-bold text-indigo-950 bg-indigo-50/60">
+                <option value="standard">🏷️ قياسي عمودي (رول حراري مفرد)</option>
+                <option value="dual_column">👥 مزدوج عمودين جنب بعض (2-Up Dual)</option>
+                <option value="shelf">🏬 ملصق رف وتخزين (سعر ضخم وباركود عريض)</option>
+                <option value="jewelry">💍 ملصق مجوهرات ونظارات (فراشة Barbell)</option>
+                <option value="promo">🔥 ملصق عرض ترويجي (شريط عريض وتخفيض)</option>
+                <option value="horizontal">↔️ مدمج أفقي (كود يسار وبيانات يمين)</option>
+              </select>
+            </div>
+            <div>
               <label class="label">شكل ونوع الباركود</label>
               <select id="lblBarcodeType" class="field font-bold text-slate-800">
                 <option value="code128">Code 128 (أحادي الأبعاد قياسي)</option>
@@ -490,21 +503,15 @@ function labelsForm(productIds, singleProduct = null) {
                 <option value="compact">مدمج رفيع (للملصقات الصغيرة)</option>
               </select>
             </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="label">مقاس ورق الطابعة الجاهز</label>
               <select id="lblPreset" class="field">
                 ${presets.map((p) => `<option value="${p.id}" ${p.id === '50x30' ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}
               </select>
             </div>
-          </div>
-
-          <div class="grid grid-cols-3 gap-3">
-            <div>${field('العرض (مم)', '<input id="lblW" type="number" value="50" min="15" max="300" class="field font-mono font-bold" />')}</div>
-            <div>${field('الارتفاع (مم)', '<input id="lblH" type="number" value="30" min="10" max="300" class="field font-mono font-bold" />')}</div>
-            <div>${field('عدد النسخ', '<input id="lblRepeats" type="number" value="1" min="1" max="500" class="field font-mono font-bold" />')}</div>
-          </div>
-
-          <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="label">زاوية الدوران</label>
               <select id="lblRotate" class="field">
@@ -514,7 +521,12 @@ function labelsForm(productIds, singleProduct = null) {
                 <option value="270">270° (عمودي يسار)</option>
               </select>
             </div>
-            <div>${field('خط الاسم (px)', '<input id="lblFontName" type="number" value="11" min="6" max="24" class="field" />')}</div>
+          </div>
+
+          <div class="grid grid-cols-4 gap-2.5">
+            <div>${field('العرض (مم)', '<input id="lblW" type="number" value="50" min="15" max="300" class="field font-mono font-bold" />')}</div>
+            <div>${field('الارتفاع (مم)', '<input id="lblH" type="number" value="30" min="10" max="300" class="field font-mono font-bold" />')}</div>
+            <div>${field('عدد النسخ', '<input id="lblRepeats" type="number" value="1" min="1" max="500" class="field font-mono font-bold" />')}</div>
             <div>${field('خط السعر (px)', '<input id="lblFontPrice" type="number" value="13" min="6" max="30" class="field" />')}</div>
           </div>
 
@@ -552,6 +564,7 @@ function labelsForm(productIds, singleProduct = null) {
     footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="lblPrintBtn" class="btn btn-primary flex items-center gap-1.5"><i class="bi bi-printer-fill"></i> طباعة الملصقات الآن</button>`,
     onMount(wrap, close) {
       wrap.querySelector('[data-cancel]').addEventListener('click', close);
+      const selTemplate = wrap.querySelector('#lblTemplate');
       const selPreset = wrap.querySelector('#lblPreset');
       const inW = wrap.querySelector('#lblW');
       const inH = wrap.querySelector('#lblH');
@@ -579,6 +592,7 @@ function labelsForm(productIds, singleProduct = null) {
       });
 
       function updateLivePreview() {
+        const tpl = selTemplate.value;
         const w = Number(inW.value) || 50;
         const h = Number(inH.value) || 30;
         const type = bType.value;
@@ -589,20 +603,19 @@ function labelsForm(productIds, singleProduct = null) {
         const showExpiry = wrap.querySelector('#lblShowExpiry').checked;
         const showLogo = wrap.querySelector('#lblShowLogo').checked;
         const showDate = wrap.querySelector('#lblShowDate').checked;
-        const nameFont = Number(wrap.querySelector('#lblFontName').value) || 11;
         const priceFont = Number(wrap.querySelector('#lblFontPrice').value) || 13;
         const specialOffer = wrap.querySelector('#lblSpecialOffer').checked;
 
         dimBadge.textContent = `${w} × ${h} مم`;
 
         const ratio = w / h;
-        let cardW = 240;
+        let cardW = 250;
         let cardH = Math.round(cardW / ratio);
-        if (cardH > 220) {
-          cardH = 220;
+        if (cardH > 230) {
+          cardH = 230;
           cardW = Math.round(cardH * ratio);
         }
-        if (cardW < 140) cardW = 140;
+        if (cardW < 150) cardW = 150;
 
         liveCard.style.width = `${cardW}px`;
         liveCard.style.height = `${cardH}px`;
@@ -614,6 +627,129 @@ function labelsForm(productIds, singleProduct = null) {
         const sku = (activeSample && (activeSample.sku || activeSample.part_number)) || 'SKU-001';
         const store = state.settings.company_name || 'شركة زين التجارية';
         const cur = state.settings.currency_symbol || 'د.ع';
+
+        if (tpl === 'dual_column') {
+          const miniGraphic = renderBarcodeGraphic(code, type === 'qr' ? 'qr' : 'compact', {
+            width: Math.round(cardW * 0.42),
+            height: 20,
+            size: 32,
+            showText: true,
+          });
+          const renderMini = () => `
+            <div class="w-[calc(50%-2px)] flex flex-col justify-between h-full p-0.5 text-center overflow-hidden">
+              <div class="text-[8px] font-bold text-slate-800 truncate">${esc(name)}</div>
+              <div class="my-auto flex items-center justify-center overflow-hidden">${miniGraphic}</div>
+              <div class="flex items-center justify-between text-[8px] font-mono border-t border-slate-100 pt-0.5">
+                <span class="text-slate-400">${esc(sku)}</span>
+                ${showPrice ? `<span class="font-bold text-indigo-700">${money(price, cur)}</span>` : ''}
+              </div>
+            </div>
+          `;
+          liveCard.innerHTML = `
+            <div class="flex items-stretch justify-between w-full h-full gap-1">
+              ${renderMini()}
+              <div class="w-[1px] border-r border-dashed border-slate-300 h-full"></div>
+              ${renderMini()}
+            </div>
+          `;
+          return;
+        }
+
+        if (tpl === 'shelf') {
+          liveCard.innerHTML = `
+            <div class="flex flex-col justify-between h-full w-full text-right p-1">
+              <div class="flex items-center justify-between border-b border-slate-900 pb-1">
+                <div class="min-w-0 pr-1">
+                  <div class="text-[8px] text-slate-500 font-bold truncate">${esc(store)}</div>
+                  <div class="font-extrabold text-slate-900 text-xs leading-none mt-0.5 truncate">${esc(name)}</div>
+                </div>
+                ${showPrice ? `<div class="bg-indigo-900 text-white font-black text-sm px-2 py-0.5 rounded shadow-sm text-left font-mono">${money(price, cur)}</div>` : ''}
+              </div>
+              <div class="flex items-center justify-between text-[8px] text-slate-600 my-1 font-mono">
+                <span class="bg-slate-100 px-1 py-0.5 rounded">رف: ${esc(activeSample && activeSample.shelf_location ? activeSample.shelf_location : 'A-01')}</span>
+                <span>${esc(sku)}</span>
+                <span>${showDate ? new Date().toLocaleDateString('ar-IQ') : ''}</span>
+              </div>
+              <div class="flex items-center justify-center my-auto overflow-hidden">
+                ${renderBarcodeGraphic(code, type, { width: Math.round(cardW * 0.92), height: 26, showText: true })}
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        if (tpl === 'jewelry') {
+          liveCard.innerHTML = `
+            <div class="flex items-center justify-between h-full w-full">
+              <div class="w-[42%] flex flex-col justify-between h-full text-right p-0.5 overflow-hidden">
+                <div class="text-[7px] font-bold text-slate-500 truncate">${esc(store)}</div>
+                <div class="text-[8px] font-bold text-slate-900 truncate leading-tight">${esc(name)}</div>
+                <div class="text-[8px] font-mono text-slate-600">${esc(sku)}</div>
+                ${showPrice ? `<div class="text-[9px] font-black text-indigo-700">${money(price, cur)}</div>` : ''}
+              </div>
+              <div class="w-[14%] flex flex-col items-center justify-center h-full px-0.5">
+                <div class="w-full border-t border-b border-dashed border-slate-300 py-1 text-[6px] text-slate-400 text-center">ذيل</div>
+              </div>
+              <div class="w-[42%] flex flex-col items-center justify-center h-full p-0.5 overflow-hidden">
+                ${renderBarcodeGraphic(code, type === 'qr' ? 'qr' : 'compact', {
+                  width: Math.round(cardW * 0.38),
+                  height: 20,
+                  size: 34,
+                  showText: true,
+                })}
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        if (tpl === 'promo') {
+          liveCard.innerHTML = `
+            <div class="flex flex-col justify-between h-full w-full border border-rose-400 rounded overflow-hidden">
+              <div class="bg-rose-600 text-white font-extrabold text-[9px] py-0.5 px-2 flex items-center justify-between">
+                <span>🔥 عرض خاص</span>
+                <span class="text-[8px] font-normal opacity-90">${esc(store)}</span>
+              </div>
+              <div class="p-1 flex flex-col justify-between flex-1 text-center">
+                <div class="font-bold text-slate-900 leading-tight text-[11px] truncate">${esc(name)}</div>
+                <div class="my-0.5 flex items-center justify-center gap-1.5">
+                  <span class="text-xs line-through text-slate-400 font-mono">${money(Math.round(price * 1.25), cur)}</span>
+                  ${showPrice ? `<span class="text-base font-black text-rose-700 font-mono">${money(price, cur)}</span>` : ''}
+                </div>
+                <div class="flex items-center justify-center my-auto overflow-hidden">
+                  ${renderBarcodeGraphic(code, type, { width: Math.round(cardW * 0.85), height: 24, showText: true })}
+                </div>
+                <div class="text-[7px] text-slate-400 flex justify-between px-1">
+                  <span>${esc(sku)}</span>
+                  <span>${showExpiry && activeSample && activeSample.expiry_date ? 'صلاحية: ' + esc(activeSample.expiry_date) : (showDate ? new Date().toLocaleDateString('ar-IQ') : '')}</span>
+                </div>
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        if (tpl === 'horizontal') {
+          liveCard.innerHTML = `
+            <div class="flex items-center justify-between h-full w-full gap-2 p-1">
+              <div class="w-[52%] flex flex-col justify-between h-full text-right overflow-hidden">
+                <div>
+                  ${showStore ? `<div class="text-[8px] font-bold text-slate-500 truncate">${esc(store)}</div>` : ''}
+                  <div class="font-bold text-slate-900 leading-tight text-[10px] mt-0.5 truncate">${esc(name)}</div>
+                  <div class="text-[8px] text-slate-400 font-mono">${esc(sku)}</div>
+                </div>
+                <div>
+                  <div class="text-[7px] text-slate-400">${showDate ? new Date().toLocaleDateString('ar-IQ') : ''}</div>
+                  ${showPrice ? `<div class="text-xs font-black text-indigo-700 font-mono">${money(price, cur)}</div>` : ''}
+                </div>
+              </div>
+              <div class="w-[48%] flex items-center justify-center h-full overflow-hidden">
+                ${renderBarcodeGraphic(code, type, { width: Math.round(cardW * 0.44), height: 32, size: Math.min(cardH * 0.7, 60), showText: true })}
+              </div>
+            </div>
+          `;
+          return;
+        }
 
         const svgGraphic = renderBarcodeGraphic(code, type, {
           width: Math.round(cardW * 0.88),
@@ -630,10 +766,10 @@ function labelsForm(productIds, singleProduct = null) {
             </div>
             ${showLogo && state.settings.print_logo_data ? `<img src="${esc(state.settings.print_logo_data)}" class="h-3.5 max-w-[24px] object-contain" />` : ''}
           </div>
-          <div class="font-bold text-slate-900 leading-tight px-1" style="font-size: ${Math.round(nameFont * 0.95)}px; max-height: 2.2em; overflow: hidden;">
+          <div class="font-bold text-slate-900 leading-tight px-1 text-[11px] max-h-[2.2em] overflow-hidden">
             ${esc(name)}
           </div>
-          ${showSize && (activeSample.package_size || sku) ? `
+          ${showSize && (activeSample && (activeSample.package_size || sku)) ? `
             <div class="flex items-center justify-between text-[8px] text-slate-400 px-1 font-mono">
               <span>${esc(sku)}</span>
               <span>${esc(activeSample.package_size || '')}</span>
@@ -643,11 +779,29 @@ function labelsForm(productIds, singleProduct = null) {
             ${svgGraphic}
           </div>
           <div class="flex items-center justify-between pt-1 border-t border-slate-100" style="font-size: 8px;">
-            <span class="text-slate-400">${showDate ? new Date().toLocaleDateString('ar-IQ') : (showExpiry && activeSample.expiry_date ? 'صلاحية: ' + esc(activeSample.expiry_date) : '')}</span>
+            <span class="text-slate-400">${showDate ? new Date().toLocaleDateString('ar-IQ') : (showExpiry && activeSample && activeSample.expiry_date ? 'صلاحية: ' + esc(activeSample.expiry_date) : '')}</span>
             ${showPrice ? `<span class="font-bold text-indigo-700" style="font-size: ${Math.round(priceFont * 0.95)}px;">${money(price, cur)}</span>` : ''}
           </div>
         `;
       }
+
+      selTemplate.addEventListener('change', () => {
+        if (selTemplate.value === 'dual_column') {
+          selPreset.value = '80x30_dual';
+          inW.value = 80;
+          inH.value = 30;
+          wrap.querySelector('#lblDual').checked = true;
+        } else if (selTemplate.value === 'jewelry') {
+          selPreset.value = '70x15_jewelry';
+          inW.value = 70;
+          inH.value = 15;
+        } else if (selTemplate.value === 'shelf') {
+          selPreset.value = '60x40';
+          inW.value = 60;
+          inH.value = 40;
+        }
+        updateLivePreview();
+      });
 
       selPreset.addEventListener('change', () => {
         const found = presets.find((p) => p.id === selPreset.value);
@@ -692,12 +846,13 @@ function labelsForm(productIds, singleProduct = null) {
 
         const payload = {
           items: itemsPayload,
+          template: selTemplate.value,
           barcode_type: bType.value,
           width_mm: Number(inW.value) || 50,
           height_mm: Number(inH.value) || 30,
           rotate: Number(wrap.querySelector('#lblRotate').value) || 0,
           repeats: Number(wrap.querySelector('#lblRepeats').value) || 1,
-          dual: wrap.querySelector('#lblDual').checked,
+          dual: selTemplate.value === 'dual_column' || wrap.querySelector('#lblDual').checked,
           special_offer: wrap.querySelector('#lblSpecialOffer').checked,
           show_border: wrap.querySelector('#lblShowBorder').checked,
           show_logo: wrap.querySelector('#lblShowLogo').checked,
@@ -706,7 +861,7 @@ function labelsForm(productIds, singleProduct = null) {
           show_date: wrap.querySelector('#lblShowDate').checked,
           show_size_color: wrap.querySelector('#lblShowSize').checked,
           show_expiry: wrap.querySelector('#lblShowExpiry').checked,
-          name_font_size: Number(wrap.querySelector('#lblFontName').value) || 11,
+          name_font_size: 11,
           price_font_size: Number(wrap.querySelector('#lblFontPrice').value) || 13,
         };
 

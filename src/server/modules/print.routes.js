@@ -237,7 +237,8 @@ module.exports = {
       const defaultRepeats = Math.max(1, Math.min(Number(b.repeats) || 1, 50));
       const rotation = [0, 90, 180, 270].includes(Number(b.rotate)) ? Number(b.rotate) : 0;
       const isMirrored = !!b.mirror;
-      const isDual = !!b.dual;
+      const template = String(b.template || (b.dual ? 'dual_column' : 'standard'));
+      const isDual = template === 'dual_column' || !!b.dual;
       const showBorder = b.show_border !== false && b.show_border !== 0 && b.show_border !== '0';
       const showLogo = !!b.show_logo;
       const showStoreName = !!b.show_store_name;
@@ -298,6 +299,22 @@ module.exports = {
         .label svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
         .dual-wrap { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
         .dual-divider { border-top: 1px dashed #94a3b8; margin: 1mm 0; }
+        .dual-columns-wrap { display: flex; flex-direction: row; justify-content: space-between; align-items: stretch; width: 100%; height: 100%; gap: 1.5mm; }
+        .dual-col { width: calc(50% - 1mm); display: flex; flex-direction: column; justify-content: space-between; height: 100%; overflow: hidden; text-align: center; }
+        .dual-sep { width: 1px; border-right: 1px dashed #cbd5e1; height: 100%; }
+        .shelf-wrap { display: flex; flex-direction: column; justify-content: space-between; height: 100%; width: 100%; text-align: right; }
+        .shelf-top { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1.5px solid #0f172a; padding-bottom: 1mm; }
+        .shelf-price { font-size: ${Math.max(priceFontSize + 3, 15)}px; font-weight: 900; color: #0f172a; line-height: 1; }
+        .shelf-tag { background: #0f172a; color: #fff; font-size: 7px; font-weight: bold; padding: 1px 4px; border-radius: 2px; }
+        .jewelry-wrap { display: flex; flex-direction: row; justify-content: space-between; align-items: center; width: 100%; height: 100%; }
+        .jewelry-wing { width: 42%; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 0.5mm; font-size: 7px; overflow: hidden; text-align: right; }
+        .jewelry-bridge { width: 14%; border-top: 1px dashed #94a3b8; border-bottom: 1px dashed #94a3b8; height: 3mm; margin: auto 0; }
+        .promo-wrap { display: flex; flex-direction: column; justify-content: space-between; height: 100%; width: 100%; border: 1.5px solid #dc2626; border-radius: 3px; overflow: hidden; }
+        .promo-banner { background: #dc2626; color: #fff; font-size: 8px; font-weight: 900; padding: 1px 4px; display: flex; justify-content: space-between; }
+        .promo-price { font-size: ${Math.max(priceFontSize + 2, 14)}px; font-weight: 900; color: #dc2626; }
+        .horiz-wrap { display: flex; flex-direction: row; justify-content: space-between; align-items: center; width: 100%; height: 100%; gap: 2mm; }
+        .horiz-info { width: 52%; text-align: right; display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
+        .horiz-code { width: 46%; display: flex; align-items: center; justify-content: center; }
         .no-print { text-align: center; width: 100%; margin-bottom: 8px; }
         .no-print button { padding: 8px 18px; cursor: pointer; background: #6366f1; color: #fff; border: 0; border-radius: 8px; font-family: inherit; font-weight: bold; }
         @media print {
@@ -308,30 +325,32 @@ module.exports = {
         }
       `;
 
-      function renderGraphic(code) {
+      function renderGraphic(code, customW, customH) {
+        const w = customW || (template === 'dual_column' ? (labelW / 2) * 3.1 : labelW * 3.4);
+        const h = customH || (template === 'dual_column' ? 24 : (template === 'shelf' ? 28 : (isDual ? 28 : 42)));
         if (barcodeType === 'qr') {
-          const s = Math.min(labelW * 2.6, (labelH - 12) * 2.6, 110);
-          return `<div style="display:flex;justify-content:center;margin:auto">${qrcode.svg(code, { size: Math.max(38, s) })}</div>`;
+          const s = Math.min(w * 0.8, h * 2.2, 110);
+          return `<div style="display:flex;justify-content:center;margin:auto">${qrcode.svg(code, { size: Math.max(34, s) })}</div>`;
         }
         if (barcodeType === 'ean13') {
-          return `<div>${ean13.svg(code, { width: labelW * 3.4, height: isDual ? 26 : 40, showText: true, color: '#000' })}</div>`;
+          return `<div>${ean13.svg(code, { width: w, height: h, showText: true, color: '#000' })}</div>`;
         }
         if (barcodeType === 'compact') {
-          return `<div>${code128.svg(code, { width: labelW * 3.4, height: 22, moduleWidth: 1, showText: true, color: '#000' })}</div>`;
+          return `<div>${code128.svg(code, { width: w, height: Math.min(h, 20), moduleWidth: 1, showText: true, color: '#000' })}</div>`;
         }
-        return `<div>${code128.svg(code, { width: labelW * 3.4, height: isDual ? 28 : 44, moduleWidth: 1, showText: true, color: '#000' })}</div>`;
+        return `<div>${code128.svg(code, { width: w, height: h, moduleWidth: 1, showText: true, color: '#000' })}</div>`;
       }
 
-      const renderOneSub = (l) => `
+      const renderOneSub = (l, isMini = false) => `
         <div class="head">
           <div class="flex items-center gap-1 min-w-0">
             ${l.image ? `<img src="${esc(l.image)}" alt="" />` : ''}
             <div>
               ${showStoreName ? `<div class="store-name">${esc(settings.company_name || '')}</div>` : ''}
-              <div class="name">${esc(l.name)}</div>
+              <div class="name" style="${isMini ? 'font-size:9px;max-height:18px;' : ''}">${esc(l.name)}</div>
             </div>
           </div>
-          ${showLogo && settings.print_logo_data ? `<img src="${esc(settings.print_logo_data)}" style="max-height:8mm;max-width:14mm;object-fit:contain" alt="" />` : ''}
+          ${showLogo && settings.print_logo_data ? `<img src="${esc(settings.print_logo_data)}" style="max-height:7mm;max-width:12mm;object-fit:contain" alt="" />` : ''}
           ${isSpecialOffer ? `<span class="special-badge">عرض خاص</span>` : ''}
         </div>
         ${(showSizeColor && (l.packageSize || l.brand)) || l.sku || (showExpiry && l.expiryDate) ? `
@@ -339,21 +358,120 @@ module.exports = {
             <span>${l.sku ? esc(l.sku) : ''} ${showSizeColor && l.packageSize ? `(${esc(l.packageSize)})` : ''}</span>
             <span>${showExpiry && l.expiryDate ? `صلاحية: ${esc(l.expiryDate)}` : ''}</span>
           </div>` : ''}
-        <div>${renderGraphic(l.code)}</div>
+        <div>${renderGraphic(l.code, isMini ? (labelW / 2) * 3 : null, isMini ? 22 : null)}</div>
         <div class="meta-line">
           ${showDate ? `<span>${new Date().toLocaleDateString('ar-IQ')}</span>` : '<span></span>'}
-          ${showPrice ? `<div class="price">${money(l.price, settings.currency_symbol || 'د.ع')}</div>` : ''}
+          ${showPrice ? `<div class="price" style="${isMini ? 'font-size:10px;' : ''}">${money(l.price, settings.currency_symbol || 'د.ع')}</div>` : ''}
         </div>
         ${tpl.labelFooter(settings)}
       `;
 
+      const renderShelfInner = (l) => `
+        <div class="shelf-wrap">
+          <div class="shelf-top">
+            <div>
+              ${showStoreName ? `<div class="store-name">${esc(settings.company_name || '')}</div>` : ''}
+              <div class="name" style="font-size:${Math.max(nameFontSize, 12)}px;max-height:30px;">${esc(l.name)}</div>
+            </div>
+            ${showPrice ? `<div class="shelf-price">${money(l.price, settings.currency_symbol || 'د.ع')}</div>` : ''}
+          </div>
+          <div class="meta-line" style="margin:1mm 0;">
+            <span class="shelf-tag">رف: ${esc(l.shelf || 'مستودع')}</span>
+            <span>${l.sku ? esc(l.sku) : ''}</span>
+            ${showExpiry && l.expiryDate ? `<span>صلاحية: ${esc(l.expiryDate)}</span>` : ''}
+          </div>
+          <div>${renderGraphic(l.code, labelW * 3.5, 30)}</div>
+          ${tpl.labelFooter(settings)}
+        </div>
+      `;
+
+      const renderJewelryInner = (l) => `
+        <div class="jewelry-wrap">
+          <div class="jewelry-wing">
+            <div class="store-name">${esc(settings.company_name || '')}</div>
+            <div class="name" style="font-size:8px;max-height:16px;">${esc(l.name)}</div>
+            <div class="sku">${esc(l.sku || '')}</div>
+            ${showPrice ? `<div class="price" style="font-size:10px;">${money(l.price, settings.currency_symbol || 'د.ع')}</div>` : ''}
+          </div>
+          <div class="jewelry-bridge"></div>
+          <div class="jewelry-wing" style="align-items:center;justify-content:center;">
+            ${renderGraphic(l.code, (labelW * 0.38) * 3, 20)}
+          </div>
+        </div>
+        ${tpl.labelFooter(settings)}
+      `;
+
+      const renderPromoInner = (l) => `
+        <div class="promo-wrap">
+          <div class="promo-banner">
+            <span>🔥 عرض خاص</span>
+            <span>${esc(settings.company_name || '')}</span>
+          </div>
+          <div style="padding:1mm;display:flex;flex-direction:column;justify-content:space-between;flex:1;">
+            <div class="name">${esc(l.name)}</div>
+            ${showPrice ? `<div class="promo-price">${money(l.price, settings.currency_symbol || 'د.ع')}</div>` : ''}
+            <div>${renderGraphic(l.code, labelW * 3.2, 24)}</div>
+            <div class="meta-line">
+              <span>${esc(l.sku || '')}</span>
+              <span>${showDate ? new Date().toLocaleDateString('ar-IQ') : ''}</span>
+            </div>
+          </div>
+        </div>
+        ${tpl.labelFooter(settings)}
+      `;
+
+      const renderHorizontalInner = (l) => `
+        <div class="horiz-wrap">
+          <div class="horiz-info">
+            <div>
+              ${showStoreName ? `<div class="store-name">${esc(settings.company_name || '')}</div>` : ''}
+              <div class="name" style="font-size:${nameFontSize}px;">${esc(l.name)}</div>
+              <div class="sku">${esc(l.sku || '')}</div>
+            </div>
+            <div>
+              ${showPrice ? `<div class="price">${money(l.price, settings.currency_symbol || 'د.ع')}</div>` : ''}
+              <div class="meta-line"><span>${showDate ? new Date().toLocaleDateString('ar-IQ') : ''}</span></div>
+            </div>
+          </div>
+          <div class="horiz-code">
+            ${renderGraphic(l.code, (labelW * 0.44) * 3.4, Math.max(labelH * 2, 28))}
+          </div>
+        </div>
+        ${tpl.labelFooter(settings)}
+      `;
+
+      let bodyContent = '';
+      if (template === 'dual_column') {
+        const pairs = [];
+        for (let i = 0; i < labels.length; i += 2) {
+          pairs.push({ l1: labels[i], l2: labels[i + 1] || labels[i] });
+        }
+        bodyContent = pairs.map(({ l1, l2 }) => `
+          <div class="label ${pageBreak ? 'page-break' : ''}">
+            <div class="dual-columns-wrap">
+              <div class="dual-col">${renderOneSub(l1, true)}</div>
+              <div class="dual-sep"></div>
+              <div class="dual-col">${renderOneSub(l2, true)}</div>
+            </div>
+          </div>
+        `).join('');
+      } else if (template === 'shelf') {
+        bodyContent = labels.map((l) => `<div class="label ${pageBreak ? 'page-break' : ''}">${renderShelfInner(l)}</div>`).join('');
+      } else if (template === 'jewelry') {
+        bodyContent = labels.map((l) => `<div class="label ${pageBreak ? 'page-break' : ''}">${renderJewelryInner(l)}</div>`).join('');
+      } else if (template === 'promo') {
+        bodyContent = labels.map((l) => `<div class="label ${pageBreak ? 'page-break' : ''}">${renderPromoInner(l)}</div>`).join('');
+      } else if (template === 'horizontal') {
+        bodyContent = labels.map((l) => `<div class="label ${pageBreak ? 'page-break' : ''}">${renderHorizontalInner(l)}</div>`).join('');
+      } else {
+        bodyContent = labels.map((l) => `<div class="label ${pageBreak ? 'page-break' : ''}">
+          ${isDual ? `<div class="dual-wrap"><div>${renderOneSub(l)}</div><div class="dual-divider"></div><div>${renderOneSub(l)}</div></div>` : renderOneSub(l)}
+        </div>`).join('');
+      }
+
       const body = `
         <div class="no-print"><button onclick="window.print()">طباعة الملصقات (${labels.length})</button></div>
-        ${labels
-          .map((l) => `<div class="label ${pageBreak ? 'page-break' : ''}">
-            ${isDual ? `<div class="dual-wrap"><div>${renderOneSub(l)}</div><div class="dual-divider"></div><div>${renderOneSub(l)}</div></div>` : renderOneSub(l)}
-          </div>`)
-          .join('')}
+        ${bodyContent}
       `;
       sendText(ctx.res, 200, htmlDoc('ملصقات الباركود', css + tpl.extraCss(settings, false), body), 'text/html; charset=utf-8');
     });
