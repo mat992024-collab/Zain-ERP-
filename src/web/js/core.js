@@ -258,6 +258,240 @@ export function barcodeSvg(text, options = {}) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${svgHeight}" viewBox="0 0 ${width} ${svgHeight}"><rect width="${width}" height="${svgHeight}" fill="${bgColor}"/>${rects}${label}</svg>`;
 }
 
+export function ean13Svg(text, options = {}) {
+  const { width = 200, height = 50, showText = true, color = '#000000', bgColor = 'transparent' } = options;
+  const L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
+  const G = ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001', '0000101', '0010001', '0001001', '0010111'];
+  const R = ['1110010', '1100110', '1101100', '1000010', '1011100', '1001110', '1010000', '1000100', '1001000', '1110100'];
+  const P = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
+
+  const clean = String(text || '').replace(/\D/g, '');
+  let first12 = clean.slice(0, 12).padStart(12, '0');
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += i % 2 === 0 ? Number(first12[i]) : Number(first12[i]) * 3;
+  const cs = (10 - (sum % 10)) % 10;
+  const ean = first12 + cs;
+
+  const first = Number(ean[0]);
+  const parity = P[first] || 'LLLLLL';
+
+  let bits = '101';
+  for (let i = 1; i <= 6; i++) {
+    const d = Number(ean[i]);
+    bits += parity[i - 1] === 'L' ? L[d] : G[d];
+  }
+  bits += '01010';
+  for (let i = 7; i <= 12; i++) {
+    const d = Number(ean[i]);
+    bits += R[d];
+  }
+  bits += '101';
+
+  const totalBits = bits.length;
+  const quiet = 7;
+  const modW = width / (totalBits + quiet * 2);
+  const textH = showText ? 14 : 0;
+  const svgH = height + textH;
+
+  let x = quiet * modW;
+  let rects = '';
+  for (let i = 0; i < totalBits; i++) {
+    if (bits[i] === '1') {
+      const isGuard = i < 3 || (i >= 45 && i < 50) || i >= 92;
+      const barH = isGuard && showText ? height + 4 : height;
+      rects += `<rect x="${x.toFixed(2)}" y="0" width="${modW.toFixed(2)}" height="${barH}" fill="${color}"/>`;
+    }
+    x += modW;
+  }
+
+  const label = showText
+    ? `<text x="${width / 2}" y="${height + 12}" text-anchor="middle" font-family="monospace" font-size="12" font-weight="bold" fill="${color}">${ean.slice(0, 1)} ${ean.slice(1, 7)} ${ean.slice(7)}</text>`
+    : '';
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${svgH}" viewBox="0 0 ${width} ${svgH}"><rect width="${width}" height="${svgH}" fill="${bgColor}"/>${rects}${label}</svg>`;
+}
+
+export function qrSvg(text, options = {}) {
+  const { size = 120, color = '#000000', bgColor = 'transparent', margin = 1 } = options;
+  const PAD0 = 0xEC;
+  const PAD1 = 0x11;
+  const GF = new Uint8Array(512);
+  const GFLOG = new Uint8Array(256);
+  let v = 1;
+  for (let i = 0; i < 255; i++) {
+    GF[i] = v; GF[i + 255] = v; GFLOG[v] = i;
+    v = (v << 1) ^ (v & 128 ? 0x11D : 0);
+  }
+  const gfMul = (a, b) => (a === 0 || b === 0 ? 0 : GF[GFLOG[a] + GFLOG[b]]);
+
+  const RS_BLOCKS = {
+    1: [16, 10], 2: [28, 16], 3: [44, 26], 4: [64, 18],
+  };
+
+  const utf8 = new TextEncoder().encode(String(text || ''));
+  const len = utf8.length;
+  let ver = 1;
+  for (let i = 1; i <= 4; i++) {
+    if (len <= RS_BLOCKS[i][0] - 2) { ver = i; break; }
+    if (i === 4) ver = 4;
+  }
+  const totalData = RS_BLOCKS[ver][0];
+  const ecCount = RS_BLOCKS[ver][1];
+
+  const bits = [];
+  const putBits = (num, count) => {
+    for (let i = count - 1; i >= 0; i--) bits.push((num >>> i) & 1);
+  };
+  putBits(4, 4);
+  putBits(len, 8);
+  for (let i = 0; i < len; i++) putBits(utf8[i], 8);
+  putBits(0, Math.min(4, totalData * 8 - bits.length));
+  while (bits.length % 8 !== 0) bits.push(0);
+
+  const data = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let b = 0;
+    for (let j = 0; j < 8; j++) b = (b << 1) | bits[i + j];
+    data.push(b);
+  }
+  let padToggle = false;
+  while (data.length < totalData) {
+    data.push(padToggle ? PAD1 : PAD0);
+    padToggle = !padToggle;
+  }
+
+  let gen = [1];
+  for (let i = 0; i < ecCount; i++) {
+    const next = new Array(gen.length + 1).fill(0);
+    const factor = GF[i];
+    for (let j = 0; j < gen.length; j++) {
+      next[j] ^= gfMul(gen[j], factor);
+      next[j + 1] ^= gen[j];
+    }
+    gen = next;
+  }
+
+  const msg = [...data, ...new Array(ecCount).fill(0)];
+  for (let i = 0; i < data.length; i++) {
+    const coef = msg[i];
+    if (coef !== 0) {
+      for (let j = 0; j < gen.length; j++) msg[i + j] ^= gfMul(gen[j], coef);
+    }
+  }
+  const finalCodewords = [...data, ...msg.slice(data.length)];
+
+  const sz = 17 + 4 * ver;
+  const matrix = Array.from({ length: sz }, () => new Array(sz).fill(null));
+  const isFunc = Array.from({ length: sz }, () => new Array(sz).fill(false));
+
+  const setFinder = (row, col) => {
+    for (let r = -1; r <= 7; r++) {
+      for (let c = -1; c <= 7; c++) {
+        const nr = row + r;
+        const nc = col + c;
+        if (nr >= 0 && nr < sz && nc >= 0 && nc < sz) {
+          isFunc[nr][nc] = true;
+          if (r >= 0 && r <= 6 && c >= 0 && c <= 6) {
+            matrix[nr][nc] = (r === 0 || r === 6 || c === 0 || c === 6 || (r >= 2 && r <= 4 && c >= 2 && c <= 4)) ? 1 : 0;
+          } else {
+            matrix[nr][nc] = 0;
+          }
+        }
+      }
+    }
+  };
+  setFinder(0, 0);
+  setFinder(0, sz - 7);
+  setFinder(sz - 7, 0);
+
+  for (let i = 8; i < sz - 8; i++) {
+    if (!isFunc[6][i]) { matrix[6][i] = i % 2 === 0 ? 1 : 0; isFunc[6][i] = true; }
+    if (!isFunc[i][6]) { matrix[i][6] = i % 2 === 0 ? 1 : 0; isFunc[i][6] = true; }
+  }
+
+  if (ver >= 2) {
+    const pos = ver === 2 ? 18 : ver === 3 ? 22 : 26;
+    for (let r = -2; r <= 2; r++) {
+      for (let c = -2; c <= 2; c++) {
+        const nr = pos + r;
+        const nc = pos + c;
+        if (isFunc[nr][nc]) continue;
+        isFunc[nr][nc] = true;
+        matrix[nr][nc] = (Math.abs(r) === 2 || Math.abs(c) === 2 || (r === 0 && c === 0)) ? 1 : 0;
+      }
+    }
+  }
+
+  matrix[4 * ver + 9][8] = 1;
+  isFunc[4 * ver + 9][8] = true;
+
+  for (let i = 0; i <= 8; i++) {
+    if (i < sz) { isFunc[8][i] = true; isFunc[i][8] = true; }
+    if (sz - 1 - i >= 0) { isFunc[8][sz - 1 - i] = true; isFunc[sz - 1 - i][8] = true; }
+  }
+
+  let byteIdx = 0;
+  let bitIdx = 7;
+  let dir = -1;
+  let r = sz - 1;
+  let c = sz - 1;
+
+  while (c > 0) {
+    if (c === 6) c--;
+    for (let i = 0; i < sz; i++) {
+      const row = dir < 0 ? r - i : i;
+      for (let col = c; col >= c - 1; col--) {
+        if (!isFunc[row][col]) {
+          let bit = 0;
+          if (byteIdx < finalCodewords.length) {
+            bit = (finalCodewords[byteIdx] >>> bitIdx) & 1;
+            bitIdx--;
+            if (bitIdx < 0) { bitIdx = 7; byteIdx++; }
+          }
+          matrix[row][col] = (row + col) % 2 === 0 ? bit ^ 1 : bit;
+        }
+      }
+    }
+    dir = -dir;
+    c -= 2;
+  }
+
+  const fBits = 0b101010000010010;
+  for (let i = 0; i < 15; i++) {
+    const bit = (fBits >>> (14 - i)) & 1;
+    if (i < 6) matrix[8][i] = bit;
+    else if (i < 8) matrix[8][i + 1] = bit;
+    else matrix[8 - (i - 7)][8] = bit;
+
+    if (i < 8) matrix[sz - 1 - i][8] = bit;
+    else matrix[8][sz - (15 - i)] = bit;
+  }
+
+  const modCount = sz + margin * 2;
+  const modSize = size / modCount;
+  let path = '';
+  for (let ro = 0; ro < sz; ro++) {
+    for (let co = 0; co < sz; co++) {
+      if (matrix[ro][co] === 1) {
+        const x = ((co + margin) * modSize).toFixed(2);
+        const y = ((ro + margin) * modSize).toFixed(2);
+        const w = modSize.toFixed(2);
+        path += `M${x},${y}h${w}v${w}h-${w}z `;
+      }
+    }
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><rect width="${size}" height="${size}" fill="${bgColor}"/><path d="${path}" fill="${color}"/></svg>`;
+}
+
+export function renderBarcodeGraphic(text, format = 'code128', options = {}) {
+  const code = String(text || '').trim();
+  if (format === 'qr') return qrSvg(code, options);
+  if (format === 'ean13') return ean13Svg(code, options);
+  if (format === 'compact') return barcodeSvg(code, { ...options, height: 24, showText: true });
+  return barcodeSvg(code, options);
+}
+
 export function readFileBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

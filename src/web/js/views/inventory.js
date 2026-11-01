@@ -1,4 +1,4 @@
-import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, debounce, formToObject, downloadFile, pickImageFile, barcodeSvg } from '../core.js';
+import { api, state, money, num, esc, toast, modal, confirmBox, field, openPrint, debounce, formToObject, downloadFile, pickImageFile, barcodeSvg, renderBarcodeGraphic } from '../core.js';
 
 const BULK_FIELDS = ['name', 'barcode', 'part_number', 'author', 'category', 'brand', 'unit', 'cost_price', 'sale_price', 'wholesale_price', 'quantity', 'reorder_level', 'tax_rate', 'expiry_date', 'supplier_id', 'track_expiry', 'is_active', 'description'];
 
@@ -185,9 +185,23 @@ function productForm(product, { categories, suppliers, currencies, onSave }) {
       <form id="prodForm" class="grid grid-cols-2 gap-4">
         ${field('اسم الصنف *', `<input name="name" value="${esc(p.name || '')}" class="field" required />`)}
         ${field('الباركود', `<input name="barcode" id="pfBarcode" value="${esc(p.barcode || '')}" class="field font-mono" placeholder="يتم توليده تلقائياً" />`)}
-        <div class="col-span-2 card p-3 flex items-center gap-3">
-          <div class="flex-1 min-w-0 overflow-auto" id="pfBarcodeBox">${p.barcode ? barcodeSvg(p.barcode, { width: 280 }) : `<div class="text-xs text-slate-400">أدخل باركود لعرض المعاينة مباشرةً</div>`}</div>
-          <button type="button" id="pfBarcodePrint" class="btn btn-ghost btn-sm"><i class="bi bi-printer"></i> طباعة باركود</button>
+        <div class="col-span-2 card p-3 flex flex-wrap items-center justify-between gap-3 bg-slate-50 border border-slate-200">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-slate-700"><i class="bi bi-upc-scan text-indigo-600"></i> شكل الباركود:</span>
+            <select id="pfBarcodeType" class="field !w-36 !py-1 text-xs">
+              <option value="code128">Code 128 (قياسي)</option>
+              <option value="ean13">EAN-13 (دولي)</option>
+              <option value="qr">QR Code (مربع)</option>
+              <option value="compact">مدمج رفيع</option>
+            </select>
+          </div>
+          <div class="flex-1 min-w-[200px] flex items-center justify-center p-2 bg-white rounded-lg border border-slate-200 overflow-hidden" id="pfBarcodeBox">
+            ${p.barcode ? renderBarcodeGraphic(p.barcode, 'code128', { width: 260 }) : `<div class="text-xs text-slate-400">أدخل باركود لعرض المعاينة مباشرةً</div>`}
+          </div>
+          <button type="button" id="pfBarcodeStudioBtn" class="btn btn-primary btn-sm flex items-center gap-1.5 shadow-sm">
+            <i class="bi bi-printer-fill"></i>
+            <span>معاينة وتحكم بطابعة الباركود</span>
+          </button>
         </div>
         ${field('الكود الداخلي / SKU', `<input name="sku" value="${esc(p.sku || '')}" class="field font-mono" placeholder="مثال: SKU-101" />`)}
         ${field('حجم العبوة', `<input name="package_size" value="${esc(p.package_size || '')}" class="field" placeholder="مثال: 9 لتر، 1 كجم" />`)}
@@ -270,24 +284,31 @@ function productForm(product, { categories, suppliers, currencies, onSave }) {
       });
       const barInput = wrap.querySelector('#pfBarcode');
       const barBox = wrap.querySelector('#pfBarcodeBox');
-      const barPrint = wrap.querySelector('#pfBarcodePrint');
-      if (barInput && barBox) {
+      const barType = wrap.querySelector('#pfBarcodeType');
+      const barStudio = wrap.querySelector('#pfBarcodeStudioBtn');
+      if (barInput && barBox && barType) {
         const updateBar = () => {
           const v = (barInput.value || '').trim();
           if (!v) { barBox.innerHTML = `<div class="text-xs text-slate-400">أدخل باركود لعرض المعاينة مباشرةً</div>`; return; }
-          barBox.innerHTML = barcodeSvg(v, { width: 280 });
+          const format = barType.value || 'code128';
+          barBox.innerHTML = renderBarcodeGraphic(v, format, { width: 260, size: 70 });
         };
         barInput.addEventListener('input', updateBar);
+        barType.addEventListener('change', updateBar);
         updateBar();
       }
-      if (barPrint && barInput) {
-        barPrint.addEventListener('click', () => {
-          const v = (barInput.value || '').trim();
-          if (!v) { toast('أدخل باركود أولاً', 'error'); return; }
-          const svg = barcodeSvg(v, { width: 400, height: 60 });
-          const html = `<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>باركود</title><style>body{font-family:Cairo,Arial;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#fff}svg{max-width:100%}</style></head><body>${svg}</body></html>`;
-          const w = window.open('', '_blank');
-          if (w) { w.document.write(html); w.document.close(); w.focus(); setTimeout(() => { try { w.print(); } catch(e){} }, 300); }
+      if (barStudio) {
+        barStudio.addEventListener('click', () => {
+          const currentProd = {
+            id: p.id || null,
+            name: (wrap.querySelector('[name="name"]').value || '').trim() || 'اسم الصنف أو المطبوعة',
+            barcode: (wrap.querySelector('#pfBarcode').value || '').trim() || '200000000001',
+            sale_price: Number(wrap.querySelector('[name="sale_price"]').value) || 0,
+            sku: (wrap.querySelector('[name="sku"]').value || '').trim() || '',
+            category: (wrap.querySelector('[name="category"]').value || '').trim() || '',
+            package_size: (wrap.querySelector('[name="package_size"]')?.value || '').trim() || '',
+          };
+          labelsForm(null, currentProd);
         });
       }
       const costIn = wrap.querySelector('[name="cost_price"]');
@@ -436,84 +457,197 @@ function bulkForm(categories, onSave) {
 }
 
 
-function labelsForm(productIds) {
-  const quick = !!productIds;
+function labelsForm(productIds, singleProduct = null) {
+  const quick = !!productIds || !!singleProduct;
+  const sample = singleProduct || (quick && productIds && productIds[0] ? null : { name: 'صنف تجريبي / نموذج ملصق', barcode: '200000000001', sale_price: 15000, sku: 'SKU-001' });
+
   const presets = [
-    { id: '50x30', w: 50, h: 30, label: '50×30 مم (ملابس وشائع)' },
+    { id: '50x30', w: 50, h: 30, label: '50×30 مم (طابعات ملصقات Xprinter / Zebra)' },
     { id: '40x25', w: 40, h: 25, label: '40×25 مم (شريط رفوف قياسي)' },
-    { id: '30x20', w: 30, h: 20, label: '30×20 مم (ملصق صغير)' },
+    { id: '30x20', w: 30, h: 20, label: '30×20 مم (ملصق صغير / مجوهرات)' },
     { id: '60x40', w: 60, h: 40, label: '60×40 مم (مخازن وتجزئة)' },
-    { id: '70x50', w: 70, h: 50, label: '70×50 مم (كبير للأغذية)' },
-    { id: '80x50', w: 80, h: 50, label: '80×50 مم (ملصق تفصيلي)' },
-    { id: '100x150', w: 100, h: 150, label: '100×150 مم (بوليصة A6)' },
-    { id: 'custom', w: 40, h: 30, label: 'مقاس مخصص' },
+    { id: '70x50', w: 70, h: 50, label: '70×50 مم (كبير ملصقات وأغذية)' },
+    { id: '80x50', w: 80, h: 50, label: '80×50 مم (ملصق تفصيلي للمطابع)' },
+    { id: '100x150', w: 100, h: 150, label: '100×150 مم (بوليصة شحن A6)' },
+    { id: 'custom', w: 50, h: 30, label: 'مقاس مخصص يدوي' },
   ];
 
   modal({
-    title: 'استوديو طباعة وتصميم الباركود والليبل',
-    size: 'max-w-2xl',
+    title: 'استوديو ومعاينة طباعة الباركود (طابعات الملصقات والحراري)',
+    size: 'max-w-4xl',
     body: `
-      <div class="space-y-4">
-        ${quick ? '' : `<div>${field('أرقام الأصناف (مفصولة بفاصلة)', '<input id="lblIds" class="field" placeholder="مثال: 1, 2, 3 أو اتركه فارغاً لطباعة أول 50 صنف" />')}</div>`}
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        <div class="lg:col-span-7 space-y-3.5 text-xs">
+          ${quick ? (singleProduct ? `<div class="p-2.5 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-between"><div class="font-bold text-indigo-900">${esc(singleProduct.name)}</div><div class="font-mono text-indigo-700">${esc(singleProduct.barcode || '')}</div></div>` : '') : `<div>${field('أرقام الأصناف (مفصولة بفاصلة)', '<input id="lblIds" class="field" placeholder="مثال: 1, 2, 3 أو اتركه فارغاً لطباعة أول 50 صنف" />')}</div>`}
 
-        <div class="grid grid-cols-3 gap-3">
-          <div>
-            <label class="label">المقاس الجاهز</label>
-            <select id="lblPreset" class="field">
-              ${presets.map((p) => `<option value="${p.id}" ${p.id === '50x30' ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}
-            </select>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label">شكل ونوع الباركود</label>
+              <select id="lblBarcodeType" class="field font-bold text-slate-800">
+                <option value="code128">Code 128 (أحادي الأبعاد قياسي)</option>
+                <option value="ean13">EAN-13 (دولي 13 رقماً)</option>
+                <option value="qr">QR Code (رمز مربع ذكي 2D)</option>
+                <option value="compact">مدمج رفيع (للملصقات الصغيرة)</option>
+              </select>
+            </div>
+            <div>
+              <label class="label">مقاس ورق الطابعة الجاهز</label>
+              <select id="lblPreset" class="field">
+                ${presets.map((p) => `<option value="${p.id}" ${p.id === '50x30' ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}
+              </select>
+            </div>
           </div>
-          <div>${field('العرض (مم)', '<input id="lblW" type="number" value="50" min="15" max="300" class="field" />')}</div>
-          <div>${field('الارتفاع (مم)', '<input id="lblH" type="number" value="30" min="10" max="300" class="field" />')}</div>
+
+          <div class="grid grid-cols-3 gap-3">
+            <div>${field('العرض (مم)', '<input id="lblW" type="number" value="50" min="15" max="300" class="field font-mono font-bold" />')}</div>
+            <div>${field('الارتفاع (مم)', '<input id="lblH" type="number" value="30" min="10" max="300" class="field font-mono font-bold" />')}</div>
+            <div>${field('عدد النسخ', '<input id="lblRepeats" type="number" value="1" min="1" max="500" class="field font-mono font-bold" />')}</div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="label">زاوية الدوران</label>
+              <select id="lblRotate" class="field">
+                <option value="0">0° (عادي)</option>
+                <option value="90">90° (عمودي يمين)</option>
+                <option value="180">180° (معكوس رأساً)</option>
+                <option value="270">270° (عمودي يسار)</option>
+              </select>
+            </div>
+            <div>${field('خط الاسم (px)', '<input id="lblFontName" type="number" value="11" min="6" max="24" class="field" />')}</div>
+            <div>${field('خط السعر (px)', '<input id="lblFontPrice" type="number" value="13" min="6" max="30" class="field" />')}</div>
+          </div>
+
+          <div class="card p-3 bg-slate-50 border border-slate-200">
+            <div class="text-xs font-bold text-slate-700 mb-2">عناصر وتصميم الملصق:</div>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowStore" checked class="w-4 h-4 accent-indigo-600" /> اسم المحل / المطبعة</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowPrice" checked class="w-4 h-4 accent-indigo-600" /> سعر البيع</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowSize" checked class="w-4 h-4 accent-indigo-600" /> المقاس / SKU</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowBorder" checked class="w-4 h-4 accent-indigo-600" /> إطار حول الملصق</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowLogo" class="w-4 h-4 accent-indigo-600" /> شعار المتجر</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowDate" class="w-4 h-4 accent-indigo-600" /> تاريخ اليوم</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowExpiry" class="w-4 h-4 accent-indigo-600" /> تاريخ الصلاحية</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblSpecialOffer" class="w-4 h-4 accent-rose-600" /> شارة "عرض خاص"</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblDual" class="w-4 h-4 accent-indigo-600" /> طباعة مزدوجة (2)</label>
+            </div>
+          </div>
         </div>
 
-        <div class="grid grid-cols-3 gap-3">
-          <div>
-            <label class="label">زاوية الدوران</label>
-            <select id="lblRotate" class="field">
-              <option value="0">0° (عادي)</option>
-              <option value="90">90° (عمودي يمين)</option>
-              <option value="180">180° (معكوس رأساً)</option>
-              <option value="270">270° (عمودي يسار)</option>
-            </select>
+        <div class="lg:col-span-5 flex flex-col items-center">
+          <div class="text-xs font-bold text-slate-700 mb-2 w-full flex items-center justify-between">
+            <span class="flex items-center gap-1.5"><i class="bi bi-eye-fill text-indigo-600"></i> معاينة الملصق المباشرة:</span>
+            <span id="lblLiveDimension" class="font-mono text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">50 × 30 مم</span>
           </div>
-          <div>${field('خط اسم الصنف (px)', '<input id="lblFontName" type="number" value="11" min="6" max="24" class="field" />')}</div>
-          <div>${field('خط السعر (px)', '<input id="lblFontPrice" type="number" value="13" min="6" max="30" class="field" />')}</div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div>${field('عدد النسخ لكل صنف', '<input id="lblRepeats" type="number" value="1" min="1" max="200" class="field" />')}</div>
-          <div class="flex items-center pt-6">
-            <label class="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
-              <input type="checkbox" id="lblUseStockQty" class="w-4 h-4 accent-zain-600" />
-              استخدام كمية المخزون كعدد نسخ تلقائياً
-            </label>
+          <div id="lblPreviewWrap" class="w-full min-h-[260px] bg-slate-100 dark:bg-slate-900 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-4 flex items-center justify-center overflow-auto shadow-inner">
+            <div id="lblLiveCard" class="bg-white text-slate-900 shadow-md transition-all duration-150 p-2 text-center flex flex-col justify-between overflow-hidden" style="width: 250px; min-height: 150px; border: 1px solid #cbd5e1; border-radius: 4px;">
+            </div>
           </div>
-        </div>
-
-        <div class="card p-3 bg-slate-50 border border-slate-200">
-          <div class="text-xs font-bold text-slate-700 mb-2">عناصر وتصميم الليبل:</div>
-          <div class="grid grid-cols-3 gap-2 text-xs">
-            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblDual" class="w-4 h-4 accent-zain-600" /> طباعة مزدوجة (2 تحت بعض)</label>
-            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblMirror" class="w-4 h-4 accent-zain-600" /> عكس الطباعة أفقياً</label>
-            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblSpecialOffer" class="w-4 h-4 accent-rose-600" /> تصميم "عرض خاص"</label>
-            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowBorder" checked class="w-4 h-4 accent-zain-600" /> إطار حول الليبل</label>
-            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowLogo" class="w-4 h-4 accent-zain-600" /> شعار المتجر</label>
-            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowStore" checked class="w-4 h-4 accent-zain-600" /> اسم المحل</label>
-            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowPrice" checked class="w-4 h-4 accent-zain-600" /> السعر</label>
-            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowDate" class="w-4 h-4 accent-zain-600" /> تاريخ اليوم</label>
-            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowSize" checked class="w-4 h-4 accent-zain-600" /> الحجم / المقاس</label>
-            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblShowExpiry" class="w-4 h-4 accent-zain-600" /> تاريخ الانتهاء</label>
-            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="lblPageBreak" class="w-4 h-4 accent-zain-600" /> كل ليبل في صفحة منفصلة</label>
+          <div class="text-[11px] text-slate-400 mt-2 text-center flex items-center gap-1">
+            <i class="bi bi-printer"></i>
+            <span>مجهزة مباشرة لطابعات رول الباركود (Xprinter / Zebra / وغيرها).</span>
           </div>
         </div>
       </div>`,
-    footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="lblPrintBtn" class="btn btn-primary"><i class="bi bi-printer"></i> بدء الطباعة</button>`,
+    footer: `<button data-cancel class="btn btn-ghost">إلغاء</button><button id="lblPrintBtn" class="btn btn-primary flex items-center gap-1.5"><i class="bi bi-printer-fill"></i> طباعة الملصقات الآن</button>`,
     onMount(wrap, close) {
       wrap.querySelector('[data-cancel]').addEventListener('click', close);
       const selPreset = wrap.querySelector('#lblPreset');
       const inW = wrap.querySelector('#lblW');
       const inH = wrap.querySelector('#lblH');
+      const bType = wrap.querySelector('#lblBarcodeType');
+      const liveCard = wrap.querySelector('#lblLiveCard');
+      const dimBadge = wrap.querySelector('#lblLiveDimension');
+
+      async function resolveSample() {
+        if (singleProduct) return singleProduct;
+        if (productIds && productIds[0]) {
+          try {
+            const res = await api('GET', `/api/products/${productIds[0]}`);
+            return res.product || sample;
+          } catch {
+            return sample;
+          }
+        }
+        return sample;
+      }
+
+      let activeSample = sample;
+      resolveSample().then((s) => {
+        activeSample = s || sample;
+        updateLivePreview();
+      });
+
+      function updateLivePreview() {
+        const w = Number(inW.value) || 50;
+        const h = Number(inH.value) || 30;
+        const type = bType.value;
+        const showBorder = wrap.querySelector('#lblShowBorder').checked;
+        const showStore = wrap.querySelector('#lblShowStore').checked;
+        const showPrice = wrap.querySelector('#lblShowPrice').checked;
+        const showSize = wrap.querySelector('#lblShowSize').checked;
+        const showExpiry = wrap.querySelector('#lblShowExpiry').checked;
+        const showLogo = wrap.querySelector('#lblShowLogo').checked;
+        const showDate = wrap.querySelector('#lblShowDate').checked;
+        const nameFont = Number(wrap.querySelector('#lblFontName').value) || 11;
+        const priceFont = Number(wrap.querySelector('#lblFontPrice').value) || 13;
+        const specialOffer = wrap.querySelector('#lblSpecialOffer').checked;
+
+        dimBadge.textContent = `${w} × ${h} مم`;
+
+        const ratio = w / h;
+        let cardW = 240;
+        let cardH = Math.round(cardW / ratio);
+        if (cardH > 220) {
+          cardH = 220;
+          cardW = Math.round(cardH * ratio);
+        }
+        if (cardW < 140) cardW = 140;
+
+        liveCard.style.width = `${cardW}px`;
+        liveCard.style.height = `${cardH}px`;
+        liveCard.style.border = showBorder ? '1px dashed #94a3b8' : '1px solid transparent';
+
+        const code = (activeSample && activeSample.barcode) || '200000000001';
+        const name = (activeSample && activeSample.name) || 'اسم الصنف أو المطبوعة';
+        const price = Number((activeSample && activeSample.sale_price) || 25000);
+        const sku = (activeSample && (activeSample.sku || activeSample.part_number)) || 'SKU-001';
+        const store = state.settings.company_name || 'شركة زين التجارية';
+        const cur = state.settings.currency_symbol || 'د.ع';
+
+        const svgGraphic = renderBarcodeGraphic(code, type, {
+          width: Math.round(cardW * 0.88),
+          height: type === 'qr' ? Math.round(cardH * 0.44) : (type === 'compact' ? 22 : 36),
+          size: Math.min(Math.round(cardW * 0.65), Math.round(cardH * 0.48)),
+          showText: type !== 'qr',
+        });
+
+        liveCard.innerHTML = `
+          <div class="flex items-center justify-between gap-1 pb-1 border-b border-slate-100" style="font-size: 9px;">
+            <div class="flex items-center gap-1 min-w-0 text-right">
+              ${showStore ? `<span class="font-bold text-slate-500 truncate max-w-[120px]">${esc(store)}</span>` : ''}
+              ${specialOffer ? `<span class="bg-rose-500 text-white font-bold px-1 rounded text-[8px]">عرض خاص</span>` : ''}
+            </div>
+            ${showLogo && state.settings.print_logo_data ? `<img src="${esc(state.settings.print_logo_data)}" class="h-3.5 max-w-[24px] object-contain" />` : ''}
+          </div>
+          <div class="font-bold text-slate-900 leading-tight px-1" style="font-size: ${Math.round(nameFont * 0.95)}px; max-height: 2.2em; overflow: hidden;">
+            ${esc(name)}
+          </div>
+          ${showSize && (activeSample.package_size || sku) ? `
+            <div class="flex items-center justify-between text-[8px] text-slate-400 px-1 font-mono">
+              <span>${esc(sku)}</span>
+              <span>${esc(activeSample.package_size || '')}</span>
+            </div>
+          ` : ''}
+          <div class="my-auto flex items-center justify-center overflow-hidden py-0.5">
+            ${svgGraphic}
+          </div>
+          <div class="flex items-center justify-between pt-1 border-t border-slate-100" style="font-size: 8px;">
+            <span class="text-slate-400">${showDate ? new Date().toLocaleDateString('ar-IQ') : (showExpiry && activeSample.expiry_date ? 'صلاحية: ' + esc(activeSample.expiry_date) : '')}</span>
+            ${showPrice ? `<span class="font-bold text-indigo-700" style="font-size: ${Math.round(priceFont * 0.95)}px;">${money(price, cur)}</span>` : ''}
+          </div>
+        `;
+      }
 
       selPreset.addEventListener('change', () => {
         const found = presets.find((p) => p.id === selPreset.value);
@@ -521,29 +655,49 @@ function labelsForm(productIds) {
           inW.value = found.w;
           inH.value = found.h;
         }
+        updateLivePreview();
+      });
+
+      wrap.querySelectorAll('input, select').forEach((el) => {
+        el.addEventListener('input', updateLivePreview);
+        el.addEventListener('change', updateLivePreview);
       });
 
       wrap.querySelector('#lblPrintBtn').addEventListener('click', async () => {
-        let ids = quick ? productIds : [];
-        if (!quick) {
-          const raw = (wrap.querySelector('#lblIds').value || '').trim();
-          if (raw) ids = raw.split(',').map((x) => Number(x.trim())).filter((x) => x > 0);
-          else {
-            const list = await api('GET', '/api/products?page_size=50').catch(() => ({ rows: [] }));
-            ids = (list.rows || []).map((x) => x.id);
+        let itemsPayload = [];
+        if (singleProduct) {
+          itemsPayload = [{
+            product_id: singleProduct.id || null,
+            name: singleProduct.name,
+            barcode: singleProduct.barcode,
+            price: singleProduct.sale_price,
+            sku: singleProduct.sku,
+            package_size: singleProduct.package_size,
+            expiry_date: singleProduct.expiry_date,
+            repeats: Number(wrap.querySelector('#lblRepeats').value) || 1,
+          }];
+        } else {
+          let ids = quick ? productIds : [];
+          if (!quick) {
+            const raw = (wrap.querySelector('#lblIds').value || '').trim();
+            if (raw) ids = raw.split(',').map((x) => Number(x.trim())).filter((x) => x > 0);
+            else {
+              const list = await api('GET', '/api/products?page_size=50').catch(() => ({ rows: [] }));
+              ids = (list.rows || []).map((x) => x.id);
+            }
           }
+          if (!ids.length) { toast('يرجى تحديد أو إدخال أصناف للطباعة', 'error'); return; }
+          itemsPayload = ids.map((id) => ({ product_id: id }));
         }
-        if (!ids.length) { toast('يرجى تحديد أو إدخال أصناف للطباعة', 'error'); return; }
 
         const payload = {
-          items: ids.map((id) => ({ product_id: id })),
-          width_mm: Number(inW.value) || 40,
+          items: itemsPayload,
+          barcode_type: bType.value,
+          width_mm: Number(inW.value) || 50,
           height_mm: Number(inH.value) || 30,
           rotate: Number(wrap.querySelector('#lblRotate').value) || 0,
           repeats: Number(wrap.querySelector('#lblRepeats').value) || 1,
-          use_stock_qty: wrap.querySelector('#lblUseStockQty').checked,
           dual: wrap.querySelector('#lblDual').checked,
-          mirror: wrap.querySelector('#lblMirror').checked,
           special_offer: wrap.querySelector('#lblSpecialOffer').checked,
           show_border: wrap.querySelector('#lblShowBorder').checked,
           show_logo: wrap.querySelector('#lblShowLogo').checked,
@@ -552,7 +706,6 @@ function labelsForm(productIds) {
           show_date: wrap.querySelector('#lblShowDate').checked,
           show_size_color: wrap.querySelector('#lblShowSize').checked,
           show_expiry: wrap.querySelector('#lblShowExpiry').checked,
-          page_break: wrap.querySelector('#lblPageBreak').checked,
           name_font_size: Number(wrap.querySelector('#lblFontName').value) || 11,
           price_font_size: Number(wrap.querySelector('#lblFontPrice').value) || 13,
         };
@@ -565,6 +718,8 @@ function labelsForm(productIds) {
             if (w) {
               w.document.write(html);
               w.document.close();
+              w.focus();
+              setTimeout(() => { try { w.print(); } catch (e) {} }, 300);
             }
           }
           close();

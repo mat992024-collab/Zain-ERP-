@@ -1,6 +1,8 @@
 const db = require('../db');
 const { sendJson, sendText } = require('../core/http');
 const code128 = require('../core/code128');
+const qrcode = require('../core/qrcode');
+const ean13 = require('../core/ean13');
 const statements = require('./statements.routes');
 const accounting = require('./accounting.routes');
 const vouchers = require('./vouchers.routes');
@@ -231,6 +233,7 @@ module.exports = {
       const settings = db.getSettings();
       const labelW = Number(b.width_mm || settings.label_width_mm) || 40;
       const labelH = Number(b.height_mm || settings.label_height_mm) || 30;
+      const barcodeType = String(b.barcode_type || 'code128');
       const defaultRepeats = Math.max(1, Math.min(Number(b.repeats) || 1, 50));
       const rotation = [0, 90, 180, 270].includes(Number(b.rotate)) ? Number(b.rotate) : 0;
       const isMirrored = !!b.mirror;
@@ -296,10 +299,28 @@ module.exports = {
         .dual-wrap { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
         .dual-divider { border-top: 1px dashed #94a3b8; margin: 1mm 0; }
         .no-print { text-align: center; width: 100%; margin-bottom: 8px; }
-        .no-print button { padding: 8px 18px; cursor: pointer; background: #6366f1; color: #fff; border: 0; border-radius: 8px; }
-        @media print { .no-print { display: none; } .label { border: ${showBorder ? '1px solid #e2e8f0' : '0'}; } }
-        @page { margin: 6mm; }
+        .no-print button { padding: 8px 18px; cursor: pointer; background: #6366f1; color: #fff; border: 0; border-radius: 8px; font-family: inherit; font-weight: bold; }
+        @media print {
+          .no-print { display: none !important; }
+          .label { border: ${showBorder ? '1px solid #cbd5e1' : '0'}; }
+          @page { size: ${labelW}mm ${labelH}mm; margin: 0; }
+          body { padding: 0 !important; margin: 0 !important; gap: 0 !important; }
+        }
       `;
+
+      function renderGraphic(code) {
+        if (barcodeType === 'qr') {
+          const s = Math.min(labelW * 2.6, (labelH - 12) * 2.6, 110);
+          return `<div style="display:flex;justify-content:center;margin:auto">${qrcode.svg(code, { size: Math.max(38, s) })}</div>`;
+        }
+        if (barcodeType === 'ean13') {
+          return `<div>${ean13.svg(code, { width: labelW * 3.4, height: isDual ? 26 : 40, showText: true, color: '#000' })}</div>`;
+        }
+        if (barcodeType === 'compact') {
+          return `<div>${code128.svg(code, { width: labelW * 3.4, height: 22, moduleWidth: 1, showText: true, color: '#000' })}</div>`;
+        }
+        return `<div>${code128.svg(code, { width: labelW * 3.4, height: isDual ? 28 : 44, moduleWidth: 1, showText: true, color: '#000' })}</div>`;
+      }
 
       const renderOneSub = (l) => `
         <div class="head">
@@ -318,7 +339,7 @@ module.exports = {
             <span>${l.sku ? esc(l.sku) : ''} ${showSizeColor && l.packageSize ? `(${esc(l.packageSize)})` : ''}</span>
             <span>${showExpiry && l.expiryDate ? `صلاحية: ${esc(l.expiryDate)}` : ''}</span>
           </div>` : ''}
-        <div>${code128.svg(l.code, { width: labelW * 3.4, height: isDual ? 28 : 44, moduleWidth: 1, showText: true, color: '#000' })}</div>
+        <div>${renderGraphic(l.code)}</div>
         <div class="meta-line">
           ${showDate ? `<span>${new Date().toLocaleDateString('ar-IQ')}</span>` : '<span></span>'}
           ${showPrice ? `<div class="price">${money(l.price, settings.currency_symbol || 'د.ع')}</div>` : ''}
