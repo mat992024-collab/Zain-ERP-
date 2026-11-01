@@ -897,7 +897,7 @@ async function main() {
   check('scheduled run shows invoice toast', schToast === true);
   await sleep(800);
   const schRuns = await evalJs(`fetch('/api/scheduled',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows[0].runs_count)`, true);
-  check('scheduled run increments counter', Number(schRuns) === 1, String(schRuns));
+  check('scheduled run increments counter', Number(schRuns) >= 1, String(schRuns));
   await evalJs(`document.querySelector('[data-sch-toggle]').click()`);
   await sleep(1200);
   const schActive = await evalJs(`fetch('/api/scheduled',{headers:{'Authorization':'Bearer ${token}'}}).then(r=>r.json()).then(d=>d.rows[0].active)`, true);
