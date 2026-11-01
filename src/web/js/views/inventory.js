@@ -457,7 +457,7 @@ function bulkForm(categories, onSave) {
 }
 
 
-function labelsForm(productIds, singleProduct = null) {
+export function labelsForm(productIds, singleProduct = null) {
   const quick = !!productIds || !!singleProduct;
   const sample = singleProduct || (quick && productIds && productIds[0] ? null : { name: 'صنف تجريبي / نموذج ملصق', barcode: '200000000001', sale_price: 15000, sku: 'SKU-001' });
 

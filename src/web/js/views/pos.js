@@ -1,4 +1,5 @@
 import { api, state, money, esc, toast, modal, field, openPrint, debounce, confirmBox } from '../core.js';
+import { labelsForm } from './inventory.js';
 
 const SUSPEND_KEY = 'zain_suspended_carts';
 
@@ -542,7 +543,10 @@ function renderCart() {
           <button data-plus="${idx}" class="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold">+</button>
         </div>
         <div class="w-24 text-left font-black text-sm text-zain-700">${money(i.qty * i.unit_price - i.discount)}</div>
-        <button data-del="${idx}" class="text-rose-400 hover:text-rose-600"><i class="bi bi-x-lg"></i></button>
+        <div class="flex items-center gap-1">
+          <button data-barcode="${idx}" class="text-indigo-500 hover:text-indigo-700 p-1 rounded hover:bg-indigo-50" title="طباعة باركود الصنف"><i class="bi bi-upc-scan text-sm"></i></button>
+          <button data-del="${idx}" class="text-rose-400 hover:text-rose-600 p-1"><i class="bi bi-x-lg"></i></button>
+        </div>
       </div>`)
     .join('');
   box.querySelectorAll('[data-qty]').forEach((el) => el.addEventListener('change', (e) => {
@@ -589,6 +593,11 @@ function renderCart() {
     const prod = products.find((x) => x.id === it.product_id);
     if (prod && !it.manual_price) it.unit_price = priceFor(prod, it.qty);
     renderCart();
+  }));
+  box.querySelectorAll('[data-barcode]').forEach((el) => el.addEventListener('click', () => {
+    const it = state.cart[+el.dataset.barcode];
+    const prod = products.find((x) => x.id === it.product_id) || it;
+    labelsForm(null, prod);
   }));
   box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', async () => {
     if (await confirmBox('هل أنت متأكد من حذف هذا الصنف من السلة؟')) {
@@ -1237,9 +1246,14 @@ async function afterSale(res, chosenPrintMode) {
     `,
     footer: `
       <div class="flex justify-between w-full">
-        <button id="salePrintThermal" class="btn btn-primary flex items-center gap-1">
-          <i class="bi bi-printer"></i> طباعة إيصال
-        </button>
+        <div class="flex items-center gap-2">
+          <button id="salePrintThermal" class="btn btn-primary flex items-center gap-1">
+            <i class="bi bi-printer"></i> طباعة إيصال
+          </button>
+          <button id="salePrintA4" class="btn btn-ghost border border-slate-200 flex items-center gap-1 text-slate-700">
+            <i class="bi bi-file-earmark-text"></i> طباعة A4
+          </button>
+        </div>
         <button data-cancel class="btn btn-ghost">فاتورة جديدة (ESC)</button>
       </div>
     `,
@@ -1247,6 +1261,9 @@ async function afterSale(res, chosenPrintMode) {
       wrap.querySelector('[data-cancel]').addEventListener('click', close);
       wrap.querySelector('#salePrintThermal').addEventListener('click', () => {
         openPrint(`/api/print/thermal/${invId}?width=${state.settings.printer_type === 'thermal58' ? 58 : 80}`);
+      });
+      wrap.querySelector('#salePrintA4').addEventListener('click', () => {
+        openPrint(`/api/print/a4/${invId}`);
       });
       wrap.querySelector('#saleCopyWa').addEventListener('click', async () => {
         if (waData.text) {

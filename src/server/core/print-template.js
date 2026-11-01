@@ -1,3 +1,4 @@
+const qrcode = require('./qrcode');
 const FONT_SIZES = { small: '10px', normal: '11.5px', large: '13px' };
 const A4_FONT_SIZES = { small: '11px', normal: '13px', large: '15px' };
 const DENSITY = { compact: '4px 8px', normal: '7px 8px', relaxed: '11px 8px' };
@@ -27,18 +28,28 @@ function paymentChannels(settings, a4 = false) {
   const wallet = settings.company_wallet || '';
   const instapay = settings.company_instapay || '';
   if (!wallet && !instapay) return '';
+  const qrData = instapay || wallet;
+  const qrSvg = qrcode.svg(qrData, { size: a4 ? 54 : 44 });
   if (a4) {
     return `
-      <div class="payment-channels" style="margin:14px 0 10px;padding:8px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;display:flex;justify-content:center;gap:28px;align-items:center;">
-        ${wallet ? `<div>📱 <b style="color:#0f172a">رقم المحفظة:</b> <span style="font-family:monospace;font-weight:bold;color:#4338ca;font-size:13px;">${esc(wallet)}</span></div>` : ''}
-        ${instapay ? `<div>⚡ <b style="color:#0f172a">إنستا باي (InstaPay):</b> <span style="font-family:monospace;font-weight:bold;color:#4338ca;font-size:13px;">${esc(instapay)}</span></div>` : ''}
+      <div class="payment-channels" style="margin:14px 0 10px;padding:8px 16px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;flex-direction:column;gap:5px;">
+          ${wallet ? `<div>📱 <b style="color:#0f172a">رقم المحفظة (فودافون كاش / وغيرها):</b> <span style="font-family:monospace;font-weight:bold;color:#4338ca;font-size:13px;">${esc(wallet)}</span></div>` : ''}
+          ${instapay ? `<div>⚡ <b style="color:#0f172a">إنستا باي (InstaPay):</b> <span style="font-family:monospace;font-weight:bold;color:#4338ca;font-size:13px;">${esc(instapay)}</span></div>` : ''}
+          <div style="font-size:10px;color:#64748b;">امسح رمز الاستجابة السريع للدفع والتحويل المباشر</div>
+        </div>
+        <div style="background:#fff;padding:4px;border:1px solid #e2e8f0;border-radius:6px;display:flex;align-items:center;justify-content:center;">
+          ${qrSvg}
+        </div>
       </div>
     `;
   }
   return `
-    <div class="payment-channels" style="margin:6px 0;padding:5px 2px;background:#f8fafc;border:1px dashed #000;border-radius:4px;text-align:center;font-size:9.5px;line-height:1.5;">
+    <div class="payment-channels" style="margin:6px 0;padding:5px 4px;background:#f8fafc;border:1px dashed #000;border-radius:4px;text-align:center;font-size:9.5px;line-height:1.5;">
       ${wallet ? `<div>📱 <b>رقم المحفظة:</b> <span style="font-family:monospace;font-weight:bold;">${esc(wallet)}</span></div>` : ''}
       ${instapay ? `<div>⚡ <b>إنستا باي:</b> <span style="font-family:monospace;font-weight:bold;">${esc(instapay)}</span></div>` : ''}
+      <div style="display:flex;justify-content:center;margin:4px auto 2px;">${qrSvg}</div>
+      <div style="font-size:8px;color:#475569;">امسح الكود للدفع السريع</div>
     </div>
   `;
 }
