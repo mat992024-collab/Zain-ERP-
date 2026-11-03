@@ -14,6 +14,7 @@
     "seed": "node src/server/seed.js",
     "reset": "node src/server/reset.js",
     "doctor": "node src/server/doctor.js",
+    "build:installer": "npm run build:css && \"C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe\" installer/setup.iss",
     "sync:watch": "node scripts/git-sync.mjs",
     "test": "npm run test:api && npm run test:render && npm run test:ui",
     "test:api": "node tests/e2e.js",
